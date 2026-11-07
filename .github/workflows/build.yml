@@ -31,3 +31,9 @@ jobs:
           mkdir build-nbc && cd build-nbc
           qmake ../nandBinCheck/nandBinCheck.pro
           make -j"$(getconf _NPROCESSORS_ONLN)"
+      - name: integrity regressions
+        run: |
+          mkdir build-tests && cd build-tests
+          qmake ../tests/nand-check.pro
+          make -j"$(getconf _NPROCESSORS_ONLN)"
+          ./nand-check-test ../build-nbc/nandBinCheck

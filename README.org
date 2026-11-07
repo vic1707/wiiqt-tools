@@ -44,6 +44,11 @@ nandBinCheck nand.bin -fs -spare -boot   # -all for everything, -v for verbose
 A type-1 dump (0x21000000) needs =keys.bin= in the same directory; a type-2 dump
 (0x21000400) carries the keys.
 
+Exit status is 1 if a selected integrity check fails, including when =-continue=
+is used. Signature warnings about patched/fakesigned titles remain warnings;
+status 0 is not proof that an image is stock or safe to flash. Only the selected
+checks are run.
+
 =ohneschwanzenegger= loads a nand.bin (Init Nand), builds a fresh one (New Nand),
 and installs titles from NUS (Get It!, e.g. an update string like =4.3E=) or from
 WADs. It has no filesystem browser - use =nandBinCheck= to inspect.
@@ -84,3 +89,10 @@ permissively licensed AES/SHA-1; GPL-2.0 is the only consistent umbrella.
 - =Get It!= depends on Nintendo's NUS CDN, which is partly decommissioned.
 - Writing a NAND can brick a console. Verify with =nandBinCheck= first and keep a
   recovery (BootMii). Not affiliated with Nintendo.
+
+* Regression check
+
+Build =tests/nand-check.pro= out of tree and run =nand-check-test /path/to/nandBinCheck=.
+It generates a temporary NAND with synthetic keys and content, checks that valid
+data passes, then verifies that changed title content and damaged HMAC/ECC data fail
+even with =-continue=. No Nintendo firmware or console dumps are needed.

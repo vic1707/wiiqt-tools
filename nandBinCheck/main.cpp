@@ -24,6 +24,7 @@ quint32 verbose = 0;
 bool tryToKeepGoing = false;
 bool color = true;
 bool calcRsa = false;
+bool checkFailed = false;
 QByteArray sysMenuResource;
 QByteArray sysMenuExe;
 quint64 sysMenuIos;
@@ -211,6 +212,7 @@ void About()
 
 void Fail( const QString& str )
 {
+    checkFailed = true;
     qCritical() << str;
     if( !tryToKeepGoing )
         exit( 1 );
@@ -260,11 +262,20 @@ void ShowBootInfo( quint8 boot1, QList<Boot2Info> boot2stuff )
         Boot2Info bi = boot2stuff.at( i );
         QString str = QString( "blocks %1 & %2: " ).arg( bi.firstBlock ).arg( bi.secondBlock );
         if( bi.state == BOOT_2_ERROR_PARSING || bi.state == BOOT_2_ERROR )
+        {
+            checkFailed = true;
             str += "parsing error";
+        }
         else if( bi.state == BOOT_2_BAD_SIGNATURE )
+        {
+            checkFailed = true;
             str +=  "Bad RSA Signature";
+        }
         else if( bi.state == BOOT_2_BAD_CONTENT_HASH )
+        {
+            checkFailed = true;
             str += "Content hash doesn't match TMD";
+        }
         else if( bi.state == BOOT_2_ERROR_PARSING )
             str += "Error parsing boot2";
         else
@@ -380,7 +391,10 @@ QList< quint64 > InstalledTitles()
     QList< quint64 > ret;
     QTreeWidgetItem *tikFolder = ItemFromPath( "/ticket" );
     if( !tikFolder )
+    {
         Fail( "Couldnt find a ticket folder in this nand" );
+        return ret;
+    }
 
     quint16 subfc = tikFolder->childCount();
     for( quint16 i = 0; i < subfc; i++ )//check all subfolders of "/ticket"
@@ -431,6 +445,8 @@ void CheckShared()
         Fail( "No content map found in the nand" );
 
     sharedM = SharedContentMap( ba );
+    if( !sharedM.Check() )
+        Fail( "Invalid content map" );
     quint16 cnt = sharedM.Count();
     for( quint16 i = 0; i < cnt; i++ )
     {
@@ -798,7 +814,7 @@ bool CheckTitleIntegrity( quint64 tid )
                 qWarning() << "\tone of the private contents' hash doesnt check out" << i << pA <<
                         "\n\texpected" << qPrintable( QString( t.Hash( i ).toHex() ) ) <<
                         "\n\tactual  " << qPrintable( QString( realH.toHex() ) );
-                //return false;									    //dont return false, as this this title may still boot
+                return false;
             }
 
             //if we are going to check the setting.txt stuff, we need to get the system menu resource file to compare ( check for opera bricks )
@@ -1093,7 +1109,8 @@ void CheckEcc()
     qDebug() << bad.size() << "out of" << checked << "pages had incorrect ecc.\nthey were spread through"
             << clusters.size() << "clusters in" << blocks.size() << "blocks:\n" << blocks;
     qDebug() << badClustersNotSpecial << "of those clusters are non-special (they belong to the fs)";
-
+    if( !bad.isEmpty() )
+        Fail( "ECC verification failed" );
 }
 
 void SetUpTree()
@@ -1170,6 +1187,8 @@ void CheckHmac()
     qDebug() << sclBad.size() << "superClusters had bad HMAC data";
     if( sclBad.size() )
         qCritical() << sclBad;
+    if( bad || !sclBad.isEmpty() )
+        Fail( "HMAC verification failed" );
 }
 
 void CheckSettingTxt()
@@ -1257,6 +1276,7 @@ void CheckSettingTxt()
     if( sysMenuResource.isEmpty() )
     {
         qCritical() << "Error getting the resource file for the system menu.\nCan\'t check it against setting.txt";
+        checkFailed = true;
     }
     else
     {
@@ -1265,6 +1285,7 @@ void CheckSettingTxt()
         if( !u8.IsOK() || !entries.size() )
         {
             qCritical() << "Error parsing the resource file for the system menu.\nCan\'t check it against setting.txt";
+            checkFailed = true;
         }
         else
         {
@@ -1300,6 +1321,7 @@ void CheckSettingTxt()
     }
     return;
 error:
+    checkFailed = true;
     qCritical() << "Something is wrong with this setting.txt";
     if( !shownSetting )
     {
@@ -1367,7 +1389,8 @@ int main( int argc, char *argv[] )
         if( ba.isEmpty() )
             Fail( "No uid map found in the nand" );
         uidM = UIDmap( ba );
-        uidM.Check();					//dont really take action, the check should spit out info if there is an error.  not all errors are fatal
+        if( !uidM.Check() )
+            Fail( "Invalid uid map" );
 
         qDebug() << "checking content.map...";
         CheckShared();					//check for the presence of the content.map as well as verify all the hashes
@@ -1381,7 +1404,8 @@ int main( int argc, char *argv[] )
         qDebug() << "found" << validIoses.size() << "bootable IOS";
         foreach( quint64 tid, tids )
         {
-            CheckTitleIntegrity( tid );
+            if( !CheckTitleIntegrity( tid ) )
+                Fail( "Title integrity verification failed: " + TidTxt( tid ) );
             //if( !CheckTitleIntegrity( tid ) && tid == 0x100000002ull )	//well, this SHOULD be the case.  but nintendo doesnt care so much about
             //Fail( "The System menu isnt valid" );			//checking signatures & hashes as the rest of us.
         }
@@ -1411,6 +1435,5 @@ int main( int argc, char *argv[] )
         qDebug() << "verifying hmac...";
         CheckHmac();
     }
-    return 0;
+    return checkFailed ? 1 : 0;
 }
-
