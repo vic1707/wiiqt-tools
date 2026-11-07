@@ -6,8 +6,11 @@ on:
   pull_request:
 
 jobs:
-  macos:
-    runs-on: macos-latest
+  build:
+    strategy:
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
       - uses: jurplel/install-qt-action@v4
@@ -17,9 +20,9 @@ jobs:
         run: |
           mkdir build-ohne && cd build-ohne
           qmake ../ohneschwanzenegger/refleurii.pro
-          make -j$(sysctl -n hw.ncpu)
+          make -j"$(getconf _NPROCESSORS_ONLN)"
       - name: build nandBinCheck
         run: |
           mkdir build-nbc && cd build-nbc
           qmake ../nandBinCheck/nandBinCheck.pro
-          make -j$(sysctl -n hw.ncpu)
+          make -j"$(getconf _NPROCESSORS_ONLN)"
