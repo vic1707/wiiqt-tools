@@ -628,7 +628,7 @@ bool MainWindow::InstallNUSItem( NusJob job )
     quint16 cnt;
     bool deleted = false;
     QTreeWidgetItem *content;
-    if( !job.tid || !job.data.size() > 2 )
+    if( !job.tid || !( job.data.size() > 2 ) )
     {
         qWarning() << "bad sizes";
         ShowMessage( "<b>Error installing title " + title + " to nand</b>" );

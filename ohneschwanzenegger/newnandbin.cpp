@@ -307,7 +307,7 @@ void NewNandBin::on_pushButton_oldNand_clicked()
     }
     QList<quint16> clusters = old.GetFats();
     QList<quint16> badBlacks;
-    if( !clusters.size() == 0x8000 )
+    if( !( clusters.size() == 0x8000 ) )
     {
         QMessageBox::warning( this, tr( "Error" ), \
                               tr( "Expected 0x8000 clusters from the nand, but got %1 instead!" ).arg( clusters.size(), 0, 16 ), QMessageBox::Ok );
