@@ -57,6 +57,16 @@ manipulators (=Qt::hex=), =QRegExp= -> =QRegularExpression=, =qrand= ->
 =QString(QByteArray)= change (fixed-size name fields trimmed at the first null).
 =aes.c=, =sha1.c= and the ECC/HMAC code are untouched.
 
+* Read-only library
+
+=WiiQt/nand.pro= builds the static =wiiqt-nand= library. An application can also
+include =WiiQt/nand.pri= to compile the same sources directly. Neither enables
+=NAND_BIN_CAN_WRITE=: dumps are opened read-only. Qt Core, Gui and Widgets are
+still required by the current data structures, but no GUI needs to be started.
+
+Seed formats, encryption and application-specific packaging belong in consuming
+tools, not this library.
+
 * Credits
 
 WiiQt and these tools: giantpune. Wii crypto and reverse engineering: Segher

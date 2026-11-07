@@ -16,6 +16,11 @@ jobs:
       - uses: jurplel/install-qt-action@v4
         with:
           version: '6.11.1'
+      - name: build read-only library
+        run: |
+          mkdir build-library && cd build-library
+          qmake ../WiiQt/nand.pro
+          make -j"$(getconf _NPROCESSORS_ONLN)"
       - name: build ohneschwanzenegger
         run: |
           mkdir build-ohne && cd build-ohne

@@ -16,18 +16,10 @@ TEMPLATE = app
 QT += core gui
 greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 
-CONFIG += c++17 sdk_no_version_check
+include(../WiiQt/nand.pri)
 
 SOURCES += main.cpp \
-    ../WiiQt/blocks0to7.cpp \
-    ../WiiQt/tiktmd.cpp \
-    ../WiiQt/nandbin.cpp \
-    ../WiiQt/tools.cpp \
-    ../WiiQt/aes.c \
-    ../WiiQt/sha1.c \
-    ../WiiQt/uidmap.cpp \
     ../WiiQt/sharedcontentmap.cpp \
-    ../WiiQt/nandspare.cpp \
     ../WiiQt/settingtxtdialog.cpp \
     ../WiiQt/u8.cpp \
     ../WiiQt/lz77.cpp \
