@@ -1,10 +1,13 @@
-QT += core gui widgets
+QT += core gui widgets network
 CONFIG += console c++17
 CONFIG -= app_bundle
 DEFINES += NAND_BIN_CAN_WRITE
 TARGET = nand-check-test
 SOURCES += nand-check.cpp \
     ../WiiQt/nandbin.cpp \
+    ../WiiQt/nandinstall.cpp \
+    ../WiiQt/nusdownloader.cpp \
+    ../WiiQt/sharedcontentmap.cpp \
     ../WiiQt/blocks0to7.cpp \
     ../WiiQt/nandspare.cpp \
     ../WiiQt/tools.cpp \
@@ -12,4 +15,5 @@ SOURCES += nand-check.cpp \
     ../WiiQt/uidmap.cpp \
     ../WiiQt/aes.c \
     ../WiiQt/sha1.c
-HEADERS += ../WiiQt/nandbin.h
+HEADERS += ../WiiQt/nandbin.h \
+    ../WiiQt/nusdownloader.h

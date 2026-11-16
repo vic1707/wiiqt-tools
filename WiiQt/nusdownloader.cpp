@@ -8,6 +8,33 @@ NusDownloader::NusDownloader( QObject *parent, const QString &cPath ) : QObject(
     currentJob.version = 0;
     totalJobs = 0;
     running = false;
+    offline = false;
+    requireSignatures = false;
+    currentDownload = NULL;
+    downloadLimit = 0;
+}
+
+void NusDownloader::SetOffline( bool off )
+{
+    offline = off;
+}
+
+void NusDownloader::SetRequireSignatures( bool require )
+{
+    requireSignatures = require;
+}
+
+bool NusGetTitleBlocking( NusDownloader &nus, NusJob &job, QString *error )
+{
+    bool ok = false;
+    QEventLoop loop;
+    QObject context;
+    QObject::connect( &nus, &NusDownloader::SendData, &context, [ & ]( const NusJob &done ){ job = done; ok = true; } );
+    QObject::connect( &nus, &NusDownloader::SendError, &context, [ & ]( const QString &message, NusJob ){ if( error ) *error = message; } );
+    QObject::connect( &nus, &NusDownloader::SendDone, &loop, &QEventLoop::quit );
+    nus.GetTitle( job );
+    loop.exec();
+    return ok;
 }
 
 //change the cache path
@@ -100,14 +127,14 @@ void NusDownloader::StartNextJob()
         else
         {
             dlJob = tmdJob;
-            QTimer::singleShot( 50, this, SLOT( StartDownload() ) );
+            QTimer::singleShot( 0, this, SLOT( StartDownload() ) );
         }
     }
     else//download the latest tmd to get the version
     {
         tmdJob.name = "tmd";
         dlJob = tmdJob;
-        QTimer::singleShot( 50, this, SLOT( StartDownload() ) );
+        QTimer::singleShot( 0, this, SLOT( StartDownload() ) );
     }
 }
 
@@ -152,25 +179,35 @@ QByteArray NusDownloader::GetDataFromCache( const downloadJob &job )
 }
 
 //load the tmd and try to get the ticket
-void NusDownloader::ReadTmdAndGetTicket( const QByteArray &ba )
+//returns false ( after reporting the error ) if the tmd is no good
+bool NusDownloader::ReadTmdAndGetTicket( const QByteArray &ba )
 {
     //qDebug() << "NusDownloader::ReadTmdAndGetTicket" << hex << ba.size();
+    //the Tmd class doesnt check that the data is big enough for what it reads
+    if( !CheckTmdMetadata( ba ) )
+    {
+        CurrentJobErrored( tr( "TMD is malformed." ) );
+        return false;
+    }
     curTmd = Tmd( ba );
     if( curTmd.Tid() != currentJob.tid )
     {
         qDebug() << curTmd.Tid() << currentJob.tid;
         CurrentJobErrored( tr( "TID in TMD doesn't match expected." ) );
-        return;
+        return false;
     }
-    if( currentJob.version == TITLE_LATEST_VERSION )
-    {
-        currentJob.version = qFromBigEndian( curTmd.payload()->title_version );
-    }
-    else if( currentJob.version != qFromBigEndian( curTmd.payload()->title_version ) )
+    if( currentJob.version != TITLE_LATEST_VERSION && currentJob.version != qFromBigEndian( curTmd.payload()->title_version ) )
     {
         CurrentJobErrored( tr( "Version in TMD doesn't match expected." ) );
-        return;
+        return false;
     }
+    if( requireSignatures && check_cert_chain( curTmd.Data() ) != ERROR_SUCCESS )
+    {
+        CurrentJobErrored( tr( "TMD is not signed by Nintendo." ) );
+        return false;
+    }
+    currentJob.version = qFromBigEndian( curTmd.payload()->title_version );
+
     //add the tmd data to the current job return
     currentJob.data << ba;
 
@@ -190,18 +227,39 @@ void NusDownloader::ReadTmdAndGetTicket( const QByteArray &ba )
     if( stuff.isEmpty() )
     {
         dlJob = tikJob;
-        QTimer::singleShot( 50, this, SLOT( StartDownload() ) );
+        QTimer::singleShot( 0, this, SLOT( StartDownload() ) );
+        return true;
     }
-    else
+    return ReadTicketAndGetContents( stuff );
+}
+
+//load the ticket and start getting the contents
+//returns false ( after reporting the error ) if the ticket is no good
+bool NusDownloader::ReadTicketAndGetContents( const QByteArray &ba )
+{
+    if( !CheckTicketMetadata( ba ) )
     {
-        Ticket t( stuff );
-        //set this key to decrypt contents
-        decKey = t.DecryptedKey();
-        //AesSetKey( t.DecryptedKey() );
-        //add the ticket data to the return
-        currentJob.data << stuff;
-        QTimer::singleShot( 50, this, SLOT( GetNextItemForCurrentTitle() ) );
+        CurrentJobErrored( tr( "Ticket is malformed." ) );
+        return false;
     }
+    //dont let the Ticket class change what was downloaded
+    Ticket t( ba, false );
+    if( t.Tid() != currentJob.tid )
+    {
+        CurrentJobErrored( tr( "TID in ticket doesn't match expected." ) );
+        return false;
+    }
+    if( requireSignatures && check_cert_chain( t.Data() ) != ERROR_SUCCESS )
+    {
+        CurrentJobErrored( tr( "Ticket is not signed by Nintendo." ) );
+        return false;
+    }
+    //remember this key to decrypt contents
+    decKey = t.DecryptedKey();
+    //add the ticket data to the return
+    currentJob.data << ba;
+    QTimer::singleShot( 0, this, SLOT( GetNextItemForCurrentTitle() ) );
+    return true;
 }
 
 //save data downloaded from the internet to local HDD for future downloads
@@ -227,26 +285,23 @@ bool NusDownloader::SaveDataToCache( const QString &path, const QByteArray &stuf
         qWarning() << "NusDownloader::SaveDataToCache -> cant create directory" << parent;
         return false;
     }
-    QFile f( path );
-    if( f.exists() )
+    if( QFileInfo::exists( path ) )
     {
         qWarning() << "NusDownloader::SaveDataToCache -> file already exists" << path;
         return false;
     }
+    //write to a temporary file and rename it, so a crash cant leave half a file in the cache
+    QSaveFile f( path );
     if( !f.open( QIODevice::WriteOnly ) )
     {
         qWarning() << "NusDownloader::SaveDataToCache -> can't create file" << path;
         return false;
     }
-    if( f.write( stuff ) != stuff.size() )
+    if( f.write( stuff ) != stuff.size() || !f.commit() )
     {
-        f.close();
-        f.remove();
         qWarning() << "NusDownloader::SaveDataToCache -> error writing data to" << path;
         return false;
     }
-    f.flush();
-    f.close();
     //qDebug() << "saved" << hex << stuff.size() << "bytes to" << path;
     return true;
 }
@@ -266,7 +321,7 @@ void NusDownloader::CurrentJobErrored( const QString &str )
 {
     qWarning() << "NusDownloader::CurrentJobErrored ->" << str;
     emit SendError( str, currentJob );
-    QTimer::singleShot( 50, this, SLOT( StartNextJob() ) );
+    QTimer::singleShot( 0, this, SLOT( StartNextJob() ) );
 }
 
 //get the next content for the current title
@@ -312,7 +367,7 @@ void NusDownloader::GetNextItemForCurrentTitle()
         }
         //qDebug() << "hash matched for index" << alreadyHave;
         if( alreadyHave + 1 < qFromBigEndian( curTmd.payload()->num_contents ) )
-            QTimer::singleShot( 50, this, SLOT( GetNextItemForCurrentTitle() ) );//next content
+            QTimer::singleShot( 0, this, SLOT( GetNextItemForCurrentTitle() ) );//next content
 
         else
         {
@@ -320,7 +375,7 @@ void NusDownloader::GetNextItemForCurrentTitle()
             emit SendTotalProgress( progress );
             emit SendTitleProgress( 100 );
             emit SendData( currentJob );
-            QTimer::singleShot( 50, this, SLOT( StartNextJob() ) );//start next job
+            QTimer::singleShot( 0, this, SLOT( StartNextJob() ) );//start next job
         }
     }
 }
@@ -381,7 +436,7 @@ bool NusDownloader::DecryptCheckHashAndAppendData( const QByteArray &encData, qu
 
     //qDebug() << "NusDownloader::DecryptCheckHashAndAppendData" << hex << encData.size() << idx;
     QByteArray paddedEncrypted = PaddedByteArray( encData, 0x40 );
-    QByteArray decData = AesDecrypt( idx, paddedEncrypted );
+    QByteArray decData = AesDecrypt( curTmd.Index( idx ), paddedEncrypted );
     decData.resize( curTmd.Size( idx ) );
     QByteArray realHash = GetSha1( decData );
     if( realHash != curTmd.Hash( idx ) )
@@ -419,22 +474,15 @@ void NusDownloader::FileIsFinishedDownloading( downloadJob job )
     {
     case IDX_TMD:
         {
-            ReadTmdAndGetTicket( job.data );
+            if( !ReadTmdAndGetTicket( job.data ) )
+                return;
             cPath = GetCachePath( job.index );
         }
         break;
     case IDX_CETK:
         {
-            Ticket t( job.data );
-            decKey = t.DecryptedKey();
-            //set this key to decrypt contents
-            //AesSetKey( t.DecryptedKey() );
-            //add the ticket data to the return
-            currentJob.data << job.data;
-            //start downloading the contents
-            //GetNextItemForCurrentTitle();
-            QTimer::singleShot( 50, this, SLOT( GetNextItemForCurrentTitle() ) );//next content
-
+            if( !ReadTicketAndGetContents( job.data ) )
+                return;
             cPath = GetCachePath( job.index );
         }
         break;
@@ -465,11 +513,11 @@ void NusDownloader::FileIsFinishedDownloading( downloadJob job )
                 emit SendTotalProgress( progress );
                 emit SendTitleProgress( 100 );
                 emit SendData( currentJob );
-                QTimer::singleShot( 50, this, SLOT( StartNextJob() ) );//move on to next job
+                QTimer::singleShot( 0, this, SLOT( StartNextJob() ) );//move on to next job
             }
 
             else
-                QTimer::singleShot( 50, this, SLOT( GetNextItemForCurrentTitle() ) );//next content
+                QTimer::singleShot( 0, this, SLOT( GetNextItemForCurrentTitle() ) );//next content
 
             cPath = GetCachePath( job.index );
         }
@@ -487,6 +535,24 @@ void NusDownloader::FileIsFinishedDownloading( downloadJob job )
 void NusDownloader::StartDownload()
 {
     //qDebug() << "NusDownloader::StartDownload" << dlJob.index;
+    if( offline )
+    {
+        CurrentJobErrored( tr( "Offline mode: required title content missing from cache" ) );
+        return;
+    }
+    //nothing from NUS should be bigger than this
+    switch( dlJob.index )
+    {
+    case IDX_TMD:
+        downloadLimit = 2 * 1024 * 1024;
+        break;
+    case IDX_CETK:
+        downloadLimit = 64 * 1024;
+        break;
+    default:
+        downloadLimit = RU( curTmd.Size( dlJob.index ), 0x40 );
+        break;
+    }
     emit SendDownloadProgress( 0 );
     QString dlUrl = NUS_BASE_URL + dlJob.tid + "/" + dlJob.name;
     qDebug() << "url" << dlUrl;
@@ -496,6 +562,9 @@ void NusDownloader::StartDownload()
 
     QNetworkRequest request( url );
     request.setRawHeader("User-Agent", UPDATING_USER_AGENT );
+    //NUS serves files directly.  dont follow a redirect to somewhere else, and give up on a stalled transfer
+    request.setAttribute( QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy );
+    request.setTransferTimeout( 60000 );
 
     currentDownload = manager.get( request );
     connect( currentDownload, SIGNAL( downloadProgress( qint64, qint64 ) ), this, SLOT( downloadProgress( qint64, qint64 ) ) );
@@ -536,10 +605,14 @@ void NusDownloader::downloadProgress( qint64 bytesReceived, qint64 bytesTotal )
 void NusDownloader::downloadFinished()
 {
     //qDebug() << "NusDownloader::downloadFinished";
-    if( currentDownload->error() )
+    if( (quint64)dlJob.data.size() > downloadLimit )
     {
-        qDebug() << "currentDownload->error()";
-        CurrentJobErrored( tr( "Error downloading part of the title." ) );
+        CurrentJobErrored( tr( "Downloaded data is bigger than expected." ) );
+    }
+    else if( currentDownload->error() || currentDownload->attribute( QNetworkRequest::HttpStatusCodeAttribute ).toInt() != 200 )
+    {
+        qDebug() << "currentDownload->error()" << currentDownload->errorString();
+        CurrentJobErrored( tr( "Error downloading part of the title: %1" ).arg( currentDownload->errorString() ) );
     }
     else
     {
@@ -554,9 +627,11 @@ void NusDownloader::downloadReadyRead()
 {
     //qDebug() << "NusDownloader::downloadReadyRead";
     dlJob.data += currentDownload->readAll();
+    if( (quint64)dlJob.data.size() > downloadLimit )
+        currentDownload->abort();
 }
 
-bool NusDownloader::GetUpdate( const QString & upd, bool decrypt )
+QMap< quint64, quint16 > NusDownloader::UpdateTitles( const QString & upd )
 {
     QString s = upd.toLower();
     QMap< quint64, quint16 > titles;
@@ -595,7 +670,7 @@ bool NusDownloader::GetUpdate( const QString & upd, bool decrypt )
     else if( s == "2.2j" ) titles = List22j();
     else if( s == "3.0j" ) titles = List30j();
     else if( s == "3.1j" ) titles = List31j();
-    else if( s == "3.2j" ) titles = List33j();
+    else if( s == "3.2j" ) titles = List32j();
     else if( s == "3.3j" ) titles = List33j();
     else if( s == "3.4j" ) titles = List34j();
     else if( s == "4.0j" ) titles = List40j();
@@ -603,7 +678,7 @@ bool NusDownloader::GetUpdate( const QString & upd, bool decrypt )
     else if( s == "4.2j" ) titles = List42j();
     else if( s == "4.3j" ) titles = List43j();
 
-    else return false;//unknown update
+    else return titles;//unknown update
 
     //make sure there is an IOS4 & 9
     if( titles.find( 0x100000004ull ) == titles.end() )
@@ -614,6 +689,14 @@ bool NusDownloader::GetUpdate( const QString & upd, bool decrypt )
     //hell, give everybody these.
     titles.insert( 0x1000248414741ull, 0x3 );//news channel HAGA
     titles.insert( 0x1000248414641ull, 0x3 );//Weather Channel HAFA
+    return titles;
+}
+
+bool NusDownloader::GetUpdate( const QString & upd, bool decrypt )
+{
+    const QMap< quint64, quint16 > titles = UpdateTitles( upd );
+    if( titles.isEmpty() )
+        return false;//unknown update
 
     QMap< quint64, quint16 >::ConstIterator i = titles.begin();
     while( i != titles.end() )
@@ -1403,7 +1486,7 @@ QMap< quint64, quint16 > NusDownloader::List43u()
     titles.insert( 0x10000001cull, 0x70f );		// IOS28
     titles.insert( 0x10000001full, 0xe18 );		// IOS31
     titles.insert( 0x100000021ull, 0xe18 );		// IOS33
-    titles.insert( 0x100000021ull, 0xe18 );		// IOS34
+    titles.insert( 0x100000022ull, 0xe18 );		// IOS34
     titles.insert( 0x100000023ull, 0xe18 );		// IOS35
     titles.insert( 0x100000024ull, 0xe18 );		// IOS36
     titles.insert( 0x100000025ull, 0x161f ); 	// IOS37

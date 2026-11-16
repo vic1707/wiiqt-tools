@@ -24,6 +24,7 @@ SOURCES += main.cpp \
     ../WiiQt/sha1.c \
     newnandbin.cpp \
     ../WiiQt/nandbin.cpp \
+    ../WiiQt/nandinstall.cpp \
     ../WiiQt/nandspare.cpp \
     ../WiiQt/blocks0to7.cpp
 HEADERS += mainwindow.h \
@@ -37,6 +38,7 @@ HEADERS += mainwindow.h \
     ../WiiQt/wad.h \
     newnandbin.h \
     ../WiiQt/nandbin.h \
+    ../WiiQt/nandinstall.h \
     ../WiiQt/nandspare.h \
     ../WiiQt/blocks0to7.h
 FORMS += mainwindow.ui \

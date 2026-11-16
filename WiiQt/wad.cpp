@@ -67,8 +67,9 @@ Wad::Wad( const QByteArray &stuff )
 	b.close();//close the buffer, the rest of the data can be checked without it
 
 	//sanity check this thing
-	quint32 s = stuff.size();
-	if( s < ( RU( certSize, 0x40 ) + RU( tikSize, 0x40 ) + RU( tmdSize, 0x40 ) + RU( appSize, 0x40 ) + RU( footerSize, 0x40 ) ) )
+	//add these up as 64bit numbers, or sizes near 4GiB wrap around and pass the check
+	quint64 s = stuff.size();
+	if( s < RU( (quint64)certSize, 0x40 ) + RU( (quint64)tikSize, 0x40 ) + RU( (quint64)tmdSize, 0x40 ) + RU( (quint64)appSize, 0x40 ) + RU( (quint64)footerSize, 0x40 ) )
 	{
 		Err( "Total size is less than the combined sizes of all the parts that it is supposed to contain" );
 		return;
@@ -76,12 +77,18 @@ Wad::Wad( const QByteArray &stuff )
 
 	quint32 pos = 0x40;
 	certData = stuff.mid( pos, certSize );
-	pos += RU( certSize, 0x4 );
+	pos += RU( certSize, 0x40 );
 	tikData = stuff.mid( pos, tikSize );
 	pos += RU( tikSize, 0x40 );
 	tmdData = stuff.mid( pos, tmdSize );
 	pos += RU( tmdSize, 0x40 );
 
+	//the Ticket and Tmd classes dont check that the data is big enough for what they read
+	if( !CheckTitleMetadata( tmdData, tikData ) )
+	{
+		Err( "Ticket or TMD is malformed" );
+		return;
+	}
 	Ticket ticket( tikData );
 	Tmd t( tmdData );
 
@@ -98,7 +105,7 @@ Wad::Wad( const QByteArray &stuff )
 	//qDebug() << "Wad contains" << hex << cnt << "contents";
 
 	//another quick sanity check
-	quint32 totalSize = 0;
+	quint64 totalSize = 0;
 	for( quint32 i = 0; i < cnt; i++ )
 		totalSize += t.Size( i );
 
@@ -127,6 +134,7 @@ Wad::Wad( const QByteArray &stuff )
 		if( realHash != t.Hash( i ) )
 		{
 			Err( QString( "hash doesnt match for content %1" ).arg( i ) );
+			return;
 		}
 		partsEnc << encData;
 	}

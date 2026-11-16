@@ -9,6 +9,7 @@ NandBin::NandBin( QObject * parent, const QString &path ) : QObject( parent )
     fatNames = false;
     fstInited = false;
     root = NULL;
+    f = nullptr;
 
     if( !path.isEmpty() )
         SetPath( path );
@@ -16,89 +17,128 @@ NandBin::NandBin( QObject * parent, const QString &path ) : QObject( parent )
 
 NandBin::~NandBin()
 {
-    if( f.isOpen() )
+    if( ownedFile.isOpen() )
     {
 #ifdef NAND_BIN_CAN_WRITE
-        f.flush();
+        ownedFile.flush();
 #endif
-        f.close();
+        ownedFile.close();
     }
+    f = nullptr;
 
     if( root )
         delete root;
 }
 
-bool NandBin::SetPath( const QString &path )
+bool NandBin::SetPath( const QString &path, Access access )
 {
     fstInited = false;
     nandPath = path;
+    sidecarKeys.clear();
     bootBlocks = Blocks0to7();
-    if( f.isOpen() )
-        f.close();
+    if( ownedFile.isOpen() )
+        ownedFile.close();
+    f = nullptr;
 
-    f.setFileName( path );
-    bool ret = ( f.exists() &&
+    ownedFile.setFileName( path );
+    auto mode = QIODevice::ReadOnly;
 #ifdef NAND_BIN_CAN_WRITE
-    f.open( QIODevice::ReadWrite ) );
+    if( access == Access::Default )
+        mode = QIODevice::ReadWrite;
 #else
-    f.open( QIODevice::ReadOnly ) );
+    Q_UNUSED( access );
 #endif
-    if( !ret )
-    {
+    const bool ret = ownedFile.exists() && ownedFile.open( mode );
+    if( ret )
+        f = &ownedFile;
+    else
         emit SendError( tr( "Cant open %1" ).arg( path ) );
-    }
-
     return ret;
+}
+
+bool NandBin::SetDevice( QIODevice *device, const QByteArray &keys )
+{
+    fstInited = false;
+    bootBlocks = Blocks0to7();
+    if( ownedFile.isOpen() )
+        ownedFile.close();
+    f = nullptr;
+    nandPath = QStringLiteral( "NAND buffer" );
+    sidecarKeys = keys;
+    if( !device || !device->isOpen() || device->isSequential() )
+        return false;
+    if( !( device->openMode() & QIODevice::ReadOnly ) )
+        return false;
+    type = GetDumpType( device->size() );
+    if( type < 0 || ( type != 2 && sidecarKeys.size() != 0x400 ) ||
+        ( type == 2 && !sidecarKeys.isEmpty() ) )
+        return false;
+    f = device;
+    return true;
 }
 
 const QString NandBin::FilePath()
 {
-    if( !f.isOpen() )
+    if( !f || !f->isOpen() )
         return QString();
-    return QFileInfo( f ).absoluteFilePath();
+    return ownedFile.isOpen() ? QFileInfo( ownedFile ).absoluteFilePath() : nandPath;
 }
 
 bool NandBin::CreateNew( const QString &path, const QByteArray &keys, const QByteArray &first8, const QList<quint16> &badBlocks )
 {
 #ifndef NAND_BIN_CAN_WRITE
-    Q_UNUSED( path );
-    Q_UNUSED( keys );
-    Q_UNUSED( first8 );
-    Q_UNUSED( badBlocks );
+    Q_UNUSED( path ); Q_UNUSED( keys ); Q_UNUSED( first8 ); Q_UNUSED( badBlocks );
     qWarning() << __FILE__ << "was built without write support";
     return false;
 #else
-    if( keys.size() != 0x400 || first8.size() != 0x108000 )
-    {
-        qWarning() << "NandBin::CreateNew -> bad sizes" << Qt::hex << keys.size() << first8.size();
+    if( ownedFile.isOpen() ) ownedFile.close();
+    f = nullptr;
+    ownedFile.setFileName( path );
+    if( !ownedFile.open( QIODevice::ReadWrite | QIODevice::Truncate ) )
         return false;
-    }
+    f = &ownedFile;
+    return CreateNewOnDevice( f, keys, first8, badBlocks, path, false );
+#endif
+}
 
-    if( f.isOpen() )
-        f.close();
+bool NandBin::CreateNew( QIODevice *device, const QByteArray &keys, const QByteArray &first8, const QList<quint16> &badBlocks )
+{
+#ifndef NAND_BIN_CAN_WRITE
+    Q_UNUSED( device ); Q_UNUSED( keys ); Q_UNUSED( first8 ); Q_UNUSED( badBlocks );
+    qWarning() << __FILE__ << "was built without write support";
+    return false;
+#else
+    return CreateNewOnDevice( device, keys, first8, badBlocks, QStringLiteral( "NAND buffer" ), true );
+#endif
+}
 
-    //create the new file, write the first 8 blocks, fill it with 0xff, and write the keys.bin at the end
-    f.setFileName( path );
-    if( !f.open( QIODevice::ReadWrite | QIODevice::Truncate ) )
-    {
-        qWarning() << "NandBin::CreateNew -> can't create file" << path;
+bool NandBin::CreateNewOnDevice( QIODevice *device, const QByteArray &keys, const QByteArray &first8, const QList<quint16> &badBlocks, const QString &label, bool fixedSize )
+{
+    if( !device || !device->isOpen() || device->isSequential() ||
+        !( device->openMode() & QIODevice::WriteOnly ) || keys.size() != 0x400 || first8.size() != 0x108000 ||
+        ( fixedSize && device->size() != 0x21000400 ) )
         return false;
-    }
-
-    f.write( first8 );
+    if( ownedFile.isOpen() && device != &ownedFile ) ownedFile.close();
+    f = device;
+    nandPath = label;
+    sidecarKeys.clear();
+    type = 2;
+    fstInited = false;
+    if( !f->seek( 0 ) ) return false;
+    if( f->write( first8 ) != first8.size() ) return false;
     QByteArray block( 0x4200, 0xff );//generic empty cluster
     for( quint16 i = 0; i < 0x7fc0; i++ )
-        f.write( block );
+        if( f->write( block ) != block.size() ) return false;
 
-    f.write( keys );
-    if( f.pos() != 0x21000400 )//no room left on the drive?
+    if( f->write( keys ) != keys.size() ) return false;
+    if( f->pos() != 0x21000400 || ( fixedSize && f->size() != 0x21000400 ) )//no room left on the drive?
     {
-        qWarning() << "NandBin::CreateNew -> dump size is wrong" << (quint32)f.pos();
+        qWarning() << "NandBin::CreateNew -> dump size is wrong" << (quint32)f->pos();
         return false;
     }
 
     //setup variables
-    nandPath = path;
+    nandPath = label;
     currentSuperCluster = 0x7f00;
     superClusterVersion = 1;
     type = 2;
@@ -158,7 +198,6 @@ bool NandBin::CreateNew( const QString &path, const QByteArray &keys, const QByt
     AddChildren( root, 0 );
 
     return true;
-#endif
 }
 
 bool NandBin::Format( bool secure )
@@ -168,9 +207,9 @@ bool NandBin::Format( bool secure )
     qWarning() << __FILE__ << "was built without write support";
     return false;
 #else
-    if( !f.isOpen() || fats.size() != 0x8000 )
+    if( !f || !f->isOpen() || fats.size() != 0x8000 )
     {
-        qWarning() << "NandBin::Format -> error" << Qt::hex << fats.size() << f.isOpen();
+        qWarning() << "NandBin::Format -> error" << Qt::hex << fats.size() << ( f && f->isOpen() );
         return false;
     }
 
@@ -185,8 +224,8 @@ bool NandBin::Format( bool secure )
         if( !secure )
             continue;
 
-        f.seek( 0x4200 * i );									//overwrite anything there with the unused cluster
-        f.write( cluster );
+        f->seek( 0x4200 * i );									//overwrite anything there with the unused cluster
+        f->write( cluster );
     }
 
     //reset fsts
@@ -423,7 +462,12 @@ bool NandBin::InitNand( const QIcon &dirs, const QIcon &files )
     fstInited = false;
     memset( (void*)&fsts, 0, sizeof( fst_t ) * 0x17ff );
     fats.clear();
-    type = GetDumpType( f.size() );
+    if( !f || !f->isOpen() )
+    {
+        emit SendError( tr( "Tried to initialize unopened NAND" ) );
+        return false;
+    }
+    type = GetDumpType( f->size() );
     if( type < 0 || type > 3 )
         return false;
 
@@ -554,6 +598,13 @@ bool NandBin::GetKey( int type )
     case 0:
     case 1:
         {
+            if( !sidecarKeys.isEmpty() )
+            {
+                if( sidecarKeys.size() != 0x400 ) return false;
+                key = sidecarKeys.mid( 0x158, 0x10 );
+                hmacKey = sidecarKeys.mid( 0x144, 0x14 );
+                break;
+            }
             QString keyPath = nandPath;
             int sl = keyPath.lastIndexOf( "/" );
             if( sl == -1 )
@@ -574,16 +625,16 @@ bool NandBin::GetKey( int type )
         break;
     case 2:
         {
-            if( !f.isOpen() )
+            if( !f || !f->isOpen() )
             {
                 emit SendError( tr( "Tried to read keys from unopened file" ) );
                 return false;
             }
-            f.seek( 0x21000144 );
-            hmacKey = f.read( 20 );
+            f->seek( 0x21000144 );
+            hmacKey = f->read( 20 );
 
-            f.seek( 0x21000158 );
-            key = f.read( 16 );
+            f->seek( 0x21000158 );
+            key = f->read( 16 );
         }
         break;
     default:
@@ -604,6 +655,12 @@ const QByteArray NandBin::Keys()
     case 0:
     case 1:
         {
+            if( !sidecarKeys.isEmpty() )
+            {
+                if( sidecarKeys.size() != 0x400 ) return ret;
+                ret = sidecarKeys;
+                break;
+            }
             QString keyPath = nandPath;
             int sl = keyPath.lastIndexOf( "/" );
             if( sl == -1 )
@@ -619,13 +676,13 @@ const QByteArray NandBin::Keys()
         break;
     case 2:
         {
-            if( !f.isOpen() )
+            if( !f || !f->isOpen() )
             {
                 emit SendError( tr( "Tried to read keys from unopened file" ) );
                 return ret;
             }
-            f.seek( 0x21000000 );
-            ret = f.read( 0x400 );
+            f->seek( 0x21000000 );
+            ret = f->read( 0x400 );
         }
         break;
     default:
@@ -675,7 +732,7 @@ qint32 NandBin::FindSuperblock()
         emit SendError( tr( "Tried to get superblock of unknown dump type" ) );
         return -1;
     }
-    if( !f.isOpen() )
+    if( !f || !f->isOpen() )
     {
         emit SendError( tr( "Tried to get superblock of unopened dump" ) );
         return -1;
@@ -689,9 +746,9 @@ qint32 NandBin::FindSuperblock()
     quint8 rewind = 1;
     for( loc = n_start[ type ], currentSuperCluster = 0x7f00; loc < n_end[ type ]; loc += n_len[ type ], currentSuperCluster += 0x10 )
     {
-        f.seek( loc );
-        //QByteArray sss = f.peek( 0x50 );
-        f.read( (char*)&magic, 4 );//no need to switch endian here
+        f->seek( loc );
+        //QByteArray sss = f->peek( 0x50 );
+        f->read( (char*)&magic, 4 );//no need to switch endian here
         if( magic != 0x53464653 )
         {
             qWarning() << "oops, this isnt a supercluster" << Qt::hex << loc << magic << currentSuperCluster;
@@ -700,7 +757,7 @@ qint32 NandBin::FindSuperblock()
             continue;
         }
 
-        f.read( (char*)&current, 4 );
+        f->read( (char*)&current, 4 );
         current = qFromBigEndian( current );
 
         //qDebug() << "superblock" << hex << current << currentSuperCluster << loc;
@@ -709,7 +766,7 @@ qint32 NandBin::FindSuperblock()
             superClusterVersion = current;
         else
         {
-            //qDebug() << "using superblock" << hex << superClusterVersion << currentSuperCluster - 0x10 << f.pos() - n_len[ type ];
+            //qDebug() << "using superblock" << hex << superClusterVersion << currentSuperCluster - 0x10 << f->pos() - n_len[ type ];
             //currentSuperCluster -= ( 0x10 * rewind );
             //loc -= ( n_len[ type ] * rewind );
             rewind = 1;
@@ -745,34 +802,40 @@ fst_t NandBin::GetFST( quint16 entry )
         //qDebug() << "reading from cache" << hex << entry;
         return fsts[ entry ];
     }
+    if( !f || !f->isOpen() || type < 0 || type > 2 )
+    {
+        emit SendError( tr( "Tried to read FST from unopened NAND" ) );
+        fst.filename[ 0 ] = '\0';
+        return fst;
+    }
     // compensate for 64 bytes of ecc data every 64 fst entries
     quint32 n_fst[] = { 0, 2, 2 };
     int loc_entry = ( ( ( entry / 0x40 ) * n_fst[ type ] ) + entry ) * 0x20;
-    if( (quint32)f.size() < loc_fst + loc_entry + sizeof( fst_t ) )
+    if( (quint32)f->size() < loc_fst + loc_entry + sizeof( fst_t ) )
     {
-        qDebug() << Qt::hex << (quint32)f.size() << loc_fst << loc_entry << type << n_fst[ type ];
+        qDebug() << Qt::hex << (quint32)f->size() << loc_fst << loc_entry << type << n_fst[ type ];
         emit SendError( tr( "Tried to read fst_t beyond size of nand.bin" ) );
         fst.filename[ 0 ] = '\0';
         return fst;
     }
-    f.seek( loc_fst + loc_entry );
+    f->seek( loc_fst + loc_entry );
 
-    f.read( (char*)&fst.filename, 0xc );
-    f.read( (char*)&fst.attr, 1 );
-    f.read( (char*)&fst.wtf, 1 );
-    f.read( (char*)&fst.sub, 2 );
-    f.read( (char*)&fst.sib, 2 );
+    f->read( (char*)&fst.filename, 0xc );
+    f->read( (char*)&fst.attr, 1 );
+    f->read( (char*)&fst.wtf, 1 );
+    f->read( (char*)&fst.sub, 2 );
+    f->read( (char*)&fst.sib, 2 );
     if( type && ( entry + 1 ) % 64 == 0 )//bug in other nand.bin extracterizers.  the entry for every 64th fst item is inturrupeted by some spare shit
     {
-        f.read( (char*)&fst.size, 2 );
-        f.seek( f.pos() + 0x40 );
-        f.read( (char*)(&fst.size) + 2, 2 );
+        f->read( (char*)&fst.size, 2 );
+        f->seek( f->pos() + 0x40 );
+        f->read( (char*)(&fst.size) + 2, 2 );
     }
     else
-        f.read( (char*)&fst.size, 4 );
-    f.read( (char*)&fst.uid, 4 );
-    f.read( (char*)&fst.gid, 2 );
-    f.read( (char*)&fst.x3, 4 );
+        f->read( (char*)&fst.size, 4 );
+    f->read( (char*)&fst.uid, 4 );
+    f->read( (char*)&fst.gid, 2 );
+    f->read( (char*)&fst.x3, 4 );
 
     fst.sub = qFromBigEndian( fst.sub );
     fst.sib = qFromBigEndian( fst.sib );
@@ -791,21 +854,26 @@ quint16 NandBin::GetFAT( quint16 fat_entry )
     if( fstInited )
         return fats.at( fat_entry );
 
+    if( !f || !f->isOpen() || type < 0 || type > 2 )
+    {
+        emit SendError( tr( "Tried to read FAT from unopened NAND" ) );
+        return 0;
+    }
     fat_entry += 6;
 
     // location in fat of cluster chain
     quint32 n_fat[] = { 0, 0x20, 0x20 };
     int loc = loc_fat + ((((fat_entry / 0x400) * n_fat[type]) + fat_entry) * 2);
 
-    if( (quint32)f.size() < loc + sizeof( quint16 ) )
+    if( (quint32)f->size() < loc + sizeof( quint16 ) )
     {
         emit SendError( tr( "Tried to read FAT entry beyond size of nand.bin" ) );
         return 0;
     }
-    f.seek( loc );
+    f->seek( loc );
 
     quint16 ret;
-    f.read( (char*)&ret, 2 );
+    f->read( (char*)&ret, 2 );
     ret = qFromBigEndian( ret );
     return ret;
 }
@@ -815,14 +883,19 @@ const QByteArray NandBin::GetPage( quint32 pageNo, bool withEcc )
     //qDebug() << "NandBin::GetPage( " << hex << pageNo << ", " << withEcc << " )";
     quint32 n_pagelen[] = { 0x800, 0x840, 0x840 };
 
-    if( f.size() < ( pageNo + 1 ) * n_pagelen[ type ] )
+    if( !f || !f->isOpen() || type < 0 || type > 2 )
+    {
+        emit SendError( tr( "Tried to read page from unopened NAND" ) );
+        return QByteArray();
+    }
+    if( f->size() < ( pageNo + 1 ) * n_pagelen[ type ] )
     {
         emit SendError( tr( "Tried to read page past size of nand.bin" ) );
         return QByteArray();
     }
-    f.seek( pageNo * n_pagelen[ type ] );	//seek to the beginning of the page to read
-    //qDebug() << "reading page from" << hex << (quint32)f.pos();
-    QByteArray page = f.read( ( type && withEcc ) ? n_pagelen[ type ] : 0x800 );
+    f->seek( pageNo * n_pagelen[ type ] );	//seek to the beginning of the page to read
+    //qDebug() << "reading page from" << hex << (quint32)f->pos();
+    QByteArray page = f->read( ( type && withEcc ) ? n_pagelen[ type ] : 0x800 );
     return page;
 }
 
@@ -832,7 +905,12 @@ const QByteArray NandBin::GetCluster( quint16 cluster_entry, bool decrypt )
     quint32 n_clusterlen[] = { 0x4000, 0x4200, 0x4200 };
     quint32 n_pagelen[] = { 0x800, 0x840, 0x840 };
 
-    if( f.size() < ( cluster_entry * n_clusterlen[ type ] ) + ( 8 * n_pagelen[ type ] ) )
+    if( !f || !f->isOpen() || type < 0 || type > 2 )
+    {
+        emit SendError( tr( "Tried to read cluster from unopened NAND" ) );
+        return QByteArray();
+    }
+    if( f->size() < ( cluster_entry * n_clusterlen[ type ] ) + ( 8 * n_pagelen[ type ] ) )
     {
         emit SendError( tr( "Tried to read cluster past size of nand.bin" ) );
         return QByteArray();
@@ -842,10 +920,10 @@ const QByteArray NandBin::GetCluster( quint16 cluster_entry, bool decrypt )
 
     for( int i = 0; i < 8; i++ )
     {
-        f.seek( ( cluster_entry * n_clusterlen[ type ] ) + ( i * n_pagelen[ type ] ) );	//seek to the beginning of the page to read
-        //qDebug() << "reading page from" << hex << (quint32)f.pos();
-        //QByteArray page = f.read( n_pagelen[ type ] );					//read the page, with ecc
-        QByteArray page = f.read( 0x800 );						//read the page, skip the ecc
+        f->seek( ( cluster_entry * n_clusterlen[ type ] ) + ( i * n_pagelen[ type ] ) );	//seek to the beginning of the page to read
+        //qDebug() << "reading page from" << hex << (quint32)f->pos();
+        //QByteArray page = f->read( n_pagelen[ type ] );					//read the page, with ecc
+        QByteArray page = f->read( 0x800 );						//read the page, skip the ecc
         //hexdump( page.mid( 0x800, 0x40 ) );//just here for debugging purposes
 
         //cluster += page.left( 0x800 );
@@ -1004,6 +1082,65 @@ const QByteArray NandBin::GetData( const QString &path )
         return QByteArray();
 
     return GetFile( entry );
+}
+
+NandEntry NandBin::EntryFromFst( quint16 entry )
+{
+    const fst_t &fst = fsts[ entry ];
+    NandEntry ret;
+    ret.index = entry;
+    ret.name = FstName( fst );
+    ret.attr = fst.attr;
+    ret.wtf = fst.wtf;
+    ret.size = fst.size;
+    ret.uid = fst.uid;
+    ret.gid = fst.gid;
+    ret.x3 = fst.x3;
+    return ret;
+}
+
+const QList<NandEntry> NandBin::Children( quint16 dir )
+{
+    QList<NandEntry> ret;
+    if( !fstInited || dir >= 0x17ff || !fsts[ dir ].filename[ 0 ] || ( fsts[ dir ].attr & 3 ) != 2 )
+        return ret;
+
+    //the tree lists a directory in the reverse order of its sibling chain
+    quint16 entry = fsts[ dir ].sub;
+    for( quint16 i = 0; i < 0x17ff && entry < 0x17ff && fsts[ entry ].filename[ 0 ]; i++ )
+    {
+        ret.prepend( EntryFromFst( entry ) );
+        entry = fsts[ entry ].sib;
+    }
+    return ret;
+}
+
+bool NandBin::Stat( const QString &path, NandEntry *entry )
+{
+    if( !fstInited || !fsts[ 0 ].filename[ 0 ] || !path.startsWith( "/" ) || path.contains( "//" ) )
+        return false;
+
+    quint16 cur = 0;
+    const QStringList names = path.split( "/", Qt::SkipEmptyParts );
+    for( const QString &name : names )
+    {
+        const QList<NandEntry> children = Children( cur );
+        bool found = false;
+        for( const NandEntry &child : children )
+        {
+            if( child.name == name )
+            {
+                cur = child.index;
+                found = true;
+                break;
+            }
+        }
+        if( !found )
+            return false;
+    }
+    if( entry )
+        *entry = EntryFromFst( cur );
+    return true;
 }
 
 QTreeWidgetItem *NandBin::ItemFromPath( const QString &path )
@@ -1192,21 +1329,26 @@ bool NandBin::WritePage( quint32 pageNo, const QByteArray &data )
 #else
     //qDebug() << "NandBin::WritePage(" << hex << pageNo << ")";
     quint32 n_pagelen[] = { 0x800, 0x840, 0x840 };
+    if( !f || !f->isOpen() || type < 0 || type > 2 )
+    {
+        emit SendError( tr( "Tried to write page to unopened NAND" ) );
+        return false;
+    }
     if( (quint32)data.size() != n_pagelen[ type ] )
     {
         qWarning() << "data is wrong size" << Qt::hex << data.size();
         return false;
     }
 
-    if( f.size() < ( pageNo + 1 ) * n_pagelen[ type ] )
+    if( f->size() < ( pageNo + 1 ) * n_pagelen[ type ] )
     {
         emit SendError( tr( "Tried to write page past size of nand.bin" ) );
         return false;
     }
-    f.seek( (quint64)pageNo * (quint64)n_pagelen[ type ] );	//seek to the beginning of the page to write
-    //qDebug() << "writing page at:" << f.pos() << hex << (quint32)f.pos();
+    f->seek( (quint64)pageNo * (quint64)n_pagelen[ type ] );	//seek to the beginning of the page to write
+    //qDebug() << "writing page at:" << f->pos() << hex << (quint32)f->pos();
     //hexdump(  data, 0, 0x20 );
-    return ( f.write( data ) == data.size() );
+    return ( f->write( data ) == data.size() );
 #endif
 }
 
@@ -1683,7 +1825,7 @@ bool NandBin::WriteMetaData()
 
 
     //make sure all the data is really written
-    f.flush();
+    if( auto file = qobject_cast<QFileDevice *>( f ) ) file->flush();
 
     // in case the version wraps around back to 0
     if( !superClusterVersion )

@@ -4,6 +4,7 @@
 #include "../WiiQt/includes.h"
 #include "../WiiQt/nusdownloader.h"
 #include "../WiiQt/nandbin.h"
+#include "../WiiQt/nandinstall.h"
 #include "../WiiQt/uidmap.h"
 #include "../WiiQt/sharedcontentmap.h"
 
@@ -44,7 +45,6 @@ private:
 
     bool InstallNUSItem( NusJob job );
     quint16 CreateIfNeeded( const QString &path, quint32 uid, quint16 gid, quint8 attr, quint8 user_perm, quint8 group_perm, quint8 other_perm );
-    bool InstallSharedContent( const QByteArray &stuff, const QByteArray &hash = QByteArray() );
 
     void SaveSettings();
     void LoadSettings();

@@ -3,6 +3,7 @@
 
 #include "../WiiQt/includes.h"
 #include "../WiiQt/nandbin.h"
+#include "../WiiQt/nandinstall.h"
 
 namespace Ui {
     class NewNandBin;

@@ -76,6 +76,9 @@ quint8 AttrFromSave( const SaveGame &save, const QString &name );
 //get a padded version of the given buffer
 QByteArray PaddedByteArray( const QByteArray &orig, quint32 padTo );
 
+//encrypt or decrypt setting.txt ( the same operation does both ); trailing 0x00 bytes are left alone
+QByteArray SettingTxtCrypt( const QByteArray &ba );
+
 //read a file into a bytearray
 QByteArray ReadFile( const QString &path );
 

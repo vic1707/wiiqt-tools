@@ -103,6 +103,9 @@ void Boot2InfoDialog::on_comboBox_boot2_currentIndexChanged( int index )
         case BOOTMII_13:
             ver = "BootMii 1.3";
             break;
+        case BOOTMII_15:
+            ver = "BootMii 1.5";
+            break;
         case BOOTMII_UNK:
             ver = "BootMii (Unk)";
             break;

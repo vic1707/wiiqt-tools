@@ -288,6 +288,8 @@ Boot2Info Blocks0to7::CheckHashes( const Boot2Info &info )
                 ret.version = BOOTMII_11;
             else if( tmdD.contains( "BM1.3" ) )
                 ret.version = BOOTMII_13;
+            else if( tmdD.contains( "BM1.5" ) )
+                ret.version = BOOTMII_15;
             else
                 ret.version = BOOTMII_UNK;
         }

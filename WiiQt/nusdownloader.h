@@ -4,6 +4,7 @@
 #include <QNetworkAccessManager>
 #include <QElapsedTimer>
 #include <QNetworkReply>
+#include <QSaveFile>
 
 #include "includes.h"
 #include "tiktmd.h"
@@ -42,6 +43,13 @@ public:
     //set the path used to cache files
     void SetCachePath( const QString &cPath = QString() );
 
+    //in offline mode nothing is downloaded: a title that is not completely in the cache fails
+    void SetOffline( bool off = true );
+
+    //only accept TMDs and tickets with a valid Nintendo signature ( fakesigned ones are refused too )
+    //with this off, only the content hashes are checked against the TMD
+    void SetRequireSignatures( bool require = true );
+
     //get a title from NUS.  if version is 0, get the latest one
     void GetTitle( const NusJob &job );
     void GetTitles( const QList<NusJob> &jobs );
@@ -53,6 +61,10 @@ public:
     //returns false if it doesnt know the IOS for the given string
     // The boot2 update is not uncluded in this.  ask for it separately if you want it
     bool GetUpdate( const QString & upd, bool decrypt = true );
+
+    //the titles GetUpdate() would get for a given update string, without getting anything
+    //returns an empty map if it doesnt know the update
+    static QMap< quint64, quint16 > UpdateTitles( const QString & upd );
 
     //get a list of titles for a given update
     //if a title is not available on NUS, a substitute is given instead ( a later version of the same title )
@@ -118,7 +130,8 @@ private:
     bool SaveDataToCache( const QString &path, const QByteArray &stuff );
 
     //check the tmd and try to ticket
-    void ReadTmdAndGetTicket( const QByteArray &ba );
+    bool ReadTmdAndGetTicket( const QByteArray &ba );
+    bool ReadTicketAndGetContents( const QByteArray &ba );
 
     bool DecryptCheckHashAndAppendData( const QByteArray &encData, quint16 idx );
 
@@ -153,6 +166,12 @@ private:
 
     //should be true if this object is busy getting a title and false if all work is done, or a fatal error
     bool running;
+
+    bool offline;
+    bool requireSignatures;
+
+    //the most bytes the current download may be
+    quint64 downloadLimit;
 
     //used to help in sending the overall progress done, should be reset on fatal error or when all jobs are done
     quint32 totalJobs;
@@ -204,5 +223,11 @@ public slots:
     void downloadReadyRead();
 };
 
+
+//get 1 title and wait for it: runs an event loop until the downloader is done
+//job should have its tid, version and decrypt set.  on success it holds the finished job
+//returns false on failure, with the reason in error if it is given
+//the downloader should not be busy with other jobs
+bool NusGetTitleBlocking( NusDownloader &nus, NusJob &job, QString *error = NULL );
 
 #endif // NUSDOWNLOADER_H

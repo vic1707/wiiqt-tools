@@ -134,6 +134,22 @@ typedef struct _cert_ecdsa {
 } __attribute__((packed)) cert_ecdsa;
 */
 //just a quick class to try to keep the rest of the code from getting full of the same shit over and over
+struct NusJob;
+
+//check that a tmd and ticket are big enough for the Tmd and Ticket classes to read safely
+//those classes dont check for themselves, and will read past the end of a truncated buffer
+//only RSA-2048 signed data is accepted, since that is all the wii uses for titles
+bool CheckTmdMetadata( const QByteArray &tmd );
+bool CheckTicketMetadata( const QByteArray &ticket );
+bool CheckTitleMetadata( const QByteArray &tmd, const QByteArray &ticket );
+
+//decrypt ( if job.decrypt is false ) and check every content of a job against its tmd
+//job.data should hold the tmd, the ticket, and then 1 item for each content
+//checks the tid and version, that content indexes and cids are unique, that contents are private or shared,
+//and the size and sha1 of each one.  the ticket's key index is not checked
+//on success, job.data holds the decrypted contents trimmed to their real size, and job.decrypt is true
+bool DecryptAndVerifyTitle( NusJob &job );
+
 class Ticket
 {
 public:

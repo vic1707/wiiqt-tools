@@ -4,6 +4,71 @@
 
 #include <iostream>
 
+bool CheckTmdMetadata( const QByteArray &tmd )
+{
+    if( tmd.size() < 0x1e4 || qFromBigEndian<quint32>( (const uchar*)tmd.constData() ) != ES_SIG_RSA2048
+        || !tmd.mid( 0x140, 0x40 ).contains( '\0' ) )
+        return false;
+
+    quint16 count = qFromBigEndian<quint16>( (const uchar*)tmd.constData() + 0x1de );
+    return count && tmd.size() >= 0x1e4 + count * 0x24;
+}
+
+bool CheckTicketMetadata( const QByteArray &ticket )
+{
+    return ticket.size() >= 0x2a4 && qFromBigEndian<quint32>( (const uchar*)ticket.constData() ) == ES_SIG_RSA2048
+            && ticket.mid( 0x140, 0x40 ).contains( '\0' );
+}
+
+bool CheckTitleMetadata( const QByteArray &tmd, const QByteArray &ticket )
+{
+    return CheckTmdMetadata( tmd ) && CheckTicketMetadata( ticket );
+}
+
+bool DecryptAndVerifyTitle( NusJob &job )
+{
+    if( !job.tid || job.data.size() < 3 || !CheckTitleMetadata( job.data.at( 0 ), job.data.at( 1 ) ) )
+        return false;
+
+    Tmd tmd( job.data.at( 0 ) );
+    Ticket ticket( job.data.at( 1 ), false );
+    quint16 count = tmd.Count();
+    if( job.data.size() != count + 2 || tmd.Tid() != job.tid || ticket.Tid() != job.tid || tmd.Version() != job.version )
+        return false;
+
+    QSet<quint16> indices;
+    QSet<QString> cids;
+    quint64 totalSize = 0;
+    for( quint16 i = 0; i < count; i++ )
+    {
+        quint64 size = tmd.Size( i );
+        totalSize += size;
+        //a nand cant hold more than 0x20000000 bytes of files
+        if( size > 0x20000000 || totalSize > 0x20000000 || indices.contains( tmd.Index( i ) )
+            || cids.contains( tmd.Cid( i ) ) || ( tmd.Type( i ) != 1 && tmd.Type( i ) != 0x8001 ) )
+            return false;
+
+        indices.insert( tmd.Index( i ) );
+        cids.insert( tmd.Cid( i ) );
+        QByteArray &content = job.data[ i + 2 ];
+        if( !job.decrypt )
+        {
+            if( content.size() % 16 || (quint64)content.size() < ( ( size + 15 ) & ~quint64( 15 ) ) )
+                return false;
+            //set the key every time, creating a Ticket changes the key the aes code is using
+            AesSetKey( ticket.DecryptedKey() );
+            content = AesDecrypt( tmd.Index( i ), content );
+        }
+        if( (quint64)content.size() < size )
+            return false;
+        content.resize( size );
+        if( GetSha1( content ) != tmd.Hash( i ) )
+            return false;
+    }
+    job.decrypt = true;
+    return true;
+}
+
 Tmd::Tmd( const QByteArray &stuff )
 {
     data = stuff;
@@ -148,7 +213,7 @@ bool Tmd::SetVersion( quint16 v )
 
 quint64 Tmd::Size( quint16 i )
 {
-    if( !p_tmd || i > qFromBigEndian( p_tmd->num_contents ) )
+    if( !p_tmd || i >= qFromBigEndian( p_tmd->num_contents ) )
         return 0;
     return qFromBigEndian( p_tmd->contents[ i ].size );
 }

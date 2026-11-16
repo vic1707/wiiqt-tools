@@ -120,21 +120,7 @@ void SettingTxtDialog::on_buttonBox_accepted()
 
 QByteArray SettingTxtDialog::LolCrypt( QByteArray ba )
 {
-    int s;
-    for( s = ba.size() - 1; s > 0; s-- )
-        if( ba.at( s ) != '\0' )
-            break;
-
-    QByteArray ret = ba;
-    quint32 key = 0x73b5dbfa;
-    quint8 * stuff = (quint8 *)ret.data();
-    for( int i = 0; i < s + 1; i++ )
-    {
-        *stuff ^= ( key & 0xff );
-        stuff++;
-        key = ( ( key << 1 ) | ( key >> 31 ) );
-    }
-    return ret;
+    return SettingTxtCrypt( ba );
 }
 
 QByteArray SettingTxtDialog::Edit( QWidget *parent, const QByteArray &old, qint8 region )

@@ -320,6 +320,9 @@ void ShowBootInfo( quint8 boot1, QList<Boot2Info> boot2stuff )
             case BOOTMII_13:
                 ver = "BootMii 1.3";
                 break;
+            case BOOTMII_15:
+                ver = "BootMii 1.5";
+                break;
             case BOOTMII_UNK:
                 ver = "BootMii (Unk)";
                 break;

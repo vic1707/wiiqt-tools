@@ -82,6 +82,25 @@ void hexdump12( const QByteArray &d, int from, int len )
     hexdump12( d.data() + from, len == -1 ? d.size() : len );
 }
 
+QByteArray SettingTxtCrypt( const QByteArray &ba )
+{
+    int s;
+    for( s = ba.size() - 1; s > 0; s-- )
+        if( ba.at( s ) != '\0' )
+            break;
+
+    QByteArray ret = ba;
+    quint32 key = 0x73b5dbfa;
+    quint8 * stuff = (quint8 *)ret.data();
+    for( int i = 0; i < s + 1; i++ )
+    {
+        *stuff ^= ( key & 0xff );
+        stuff++;
+        key = ( ( key << 1 ) | ( key >> 31 ) );
+    }
+    return ret;
+}
+
 QByteArray PaddedByteArray( const QByteArray &orig, quint32 padTo )
 {
     //qDebug() << "need to pad from" << hex << orig.size() << "to nearest" << padTo;

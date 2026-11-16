@@ -26,6 +26,7 @@ enum	//returned by Boot1Version().  theres no official names for these, so ill j
 #define BOOTMII_UNK 0x2110
 #define BOOTMII_11 0x2111
 #define BOOTMII_13 0x2113
+#define BOOTMII_15 0x2115
 //TODO: what other versions of bootmii are there?
 
 //enum used to convey the state of each copy of boot2 on a nand

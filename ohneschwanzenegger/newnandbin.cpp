@@ -82,28 +82,11 @@ void NewNandBin::on_pushButton_bb_rm_clicked()
 
 bool NewNandBin::CreateDefaultEntries()
 {
-    if( !nand.CreateEntry( "/sys", 0, 0, NAND_DIR, NAND_RW, NAND_RW, 0 )
-        || !nand.CreateEntry( "/ticket", 0, 0, NAND_DIR, NAND_RW, NAND_RW, 0 )
-        || !nand.CreateEntry( "/title", 0, 0, NAND_DIR, NAND_RW, NAND_RW, NAND_READ )
-        || !nand.CreateEntry( "/shared1", 0, 0, NAND_DIR, NAND_RW, NAND_RW, 0 )
-        || !nand.CreateEntry( "/shared2", 0, 0, NAND_DIR, NAND_RW, NAND_RW, NAND_RW )
-        || !nand.CreateEntry( "/import", 0, 0, NAND_DIR, NAND_RW, NAND_RW, 0 )
-        || !nand.CreateEntry( "/meta", 0x1000, 1, NAND_DIR, NAND_RW, NAND_RW, NAND_RW )
-        || !nand.CreateEntry( "/tmp", 0, 0, NAND_DIR, NAND_RW, NAND_RW, NAND_RW )
-        || !nand.WriteMetaData() )
+    if( !NandCreateDefaultEntries( nand ) || !nand.WriteMetaData() )
     {
-        qWarning() << "NewNandBin::on_buttonBox_accepted -> error creating directories in the new nand";
+        qWarning() << "NewNandBin::on_buttonBox_accepted -> error creating directories or cert in the new nand";
         QMessageBox::warning( this, tr( "Error" ), \
-                              tr( "Can't create base folders in the new nand." ) );
-        return false;
-    }
-    //add cert.sys
-    quint16 handle = nand.CreateEntry( "/sys/cert.sys", 0, 0, NAND_FILE, NAND_RW, NAND_RW, NAND_READ );
-    if( !handle || !nand.SetData( handle, QByteArray( (const char*)&certs_dat, CERTS_DAT_SIZE ) ) )
-    {
-        qWarning() << "NewNandBin::on_buttonBox_accepted -> error creating cert in the new nand";
-        QMessageBox::warning( this, tr( "Error" ), \
-                              tr( "Can't create cert.sys in the new nand." ) );
+                              tr( "Can't create base folders and cert.sys in the new nand." ) );
         return false;
     }
     //create uid.sys

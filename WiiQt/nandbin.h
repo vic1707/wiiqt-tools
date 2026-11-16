@@ -4,6 +4,7 @@
 #include "includes.h"
 #include "blocks0to7.h"
 #include "nandspare.h"
+#include <QIODevice>
 
 struct fst_t
 {
@@ -18,6 +19,23 @@ struct fst_t
     quint32 x3;
     quint16 fst_pos;//not really part of the nand structure, but needed when calculating hmac data
 };
+
+//one entry of the filesystem, as it is stored in the FST
+struct NandEntry
+{
+    quint16 index = 0;//entry #
+    QString name;
+    quint8 attr = 0;//type and permissions, see the NAND_ATTR macros in tools.h
+    quint8 wtf = 0;
+    quint32 size = 0;
+    quint32 uid = 0;
+    quint16 gid = 0;
+    quint32 x3 = 0;
+
+    bool IsFile() const { return ( attr & 3 ) == 1; }
+    bool IsDir() const { return ( attr & 3 ) == 2; }
+};
+
 // class to deal with an encrypted wii nand dump
 // basic usage... create an object, set a path, call InitNand.  then you can get the detailed list of entries with GetTree()
 // extract files with GetFile()
@@ -40,10 +58,16 @@ public:
     //first8 should be a bytearray containing 0x108000 bytes - the first 8 blocks of the nand with spare data
     //badBlocks is a list of blocks to be marked bad, in the range 8 - 4079
     bool CreateNew( const QString &path, const QByteArray &keys, const QByteArray &first8, const QList<quint16> &badBlocks = QList<quint16>() );
+    bool CreateNew( QIODevice *device, const QByteArray &keys, const QByteArray &first8, const QList<quint16> &badBlocks = QList<quint16>() );
 
     //sets the path of this object to path.  returns false if it cannot open an already existing file
     //keys.bin should be in this same path if they are to be used
-    bool SetPath( const QString &path );
+    enum class Access { Default, ReadOnly };
+    bool SetPath( const QString &path, Access access = Access::Default );
+
+    // Attach a caller-owned, open random-access NAND device. It must remain
+    // alive until this NandBin is destroyed. Footerless dumps require sidecar keys.
+    bool SetDevice( QIODevice *device, const QByteArray &sidecarKeys = QByteArray() );
 
     //try to read the filesystem and create a tree from its contents
     //this takes care of the stuff like reading the keys, finding teh superblock, and creating the QTreeWidgetItem* tree
@@ -63,6 +87,15 @@ public:
     // 6 mode
     // 7 attr
     QTreeWidgetItem *GetTree();
+
+    //typed lookups for code that doesnt want a QTreeWidgetItem tree.  these read the current FST, nothing is cloned
+    //get the entry for a path ( "/" is the root ).  returns false if there is no such entry
+    //entry may be NULL to only check if the path exists
+    bool Stat( const QString &path, NandEntry *entry = NULL );
+
+    //get the entries inside a directory, in the same order as the children of its item in GetTree()
+    //returns an empty list if the entry is not a directory
+    const QList<NandEntry> Children( quint16 dir );
 
     //extracts an item( and all its children ) to a directory
     //this function is BLOCKING and will block the current thread, so if done in the gui thread, it will freeze your GUI till it returns
@@ -154,7 +187,9 @@ private:
     quint32 superClusterVersion;
     QString extractPath;
     QString nandPath;
-    QFile f;
+    QFile ownedFile;
+    QIODevice *f = nullptr;
+    QByteArray sidecarKeys;
     int type;
 
     bool fatNames;
@@ -172,6 +207,7 @@ private:
     // uses ~64KiB
     QList<quint16>fats;
 
+    bool CreateNewOnDevice( QIODevice *device, const QByteArray &keys, const QByteArray &first8, const QList<quint16> &badBlocks, const QString &label, bool fixedSize );
     int GetDumpType( quint64 fileSize );
     bool GetKey( int type );
     const QByteArray ReadKeyfile( const QString &path, quint8 type );//type 0 for nand key, type 1 for hmac
@@ -189,6 +225,8 @@ private:
     QTreeWidgetItem *CreateItem( QTreeWidgetItem *parent, const QString &name, quint32 size, quint16 entry, quint32 uid, quint32 gid, quint32 x3, quint8 attr, quint8 wtf);
 
 
+
+    NandEntry EntryFromFst( quint16 entry );
 
     QTreeWidgetItem *root;
     bool AddChildren( QTreeWidgetItem *parent, quint16 entry );

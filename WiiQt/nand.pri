@@ -1,4 +1,4 @@
-# Read-only NAND support, shared by the inspector and external tools.
+# NAND reading core, shared by the inspector and the library in nand.pro.
 QT += core gui widgets
 CONFIG += c++17 sdk_no_version_check
 INCLUDEPATH += $$PWD

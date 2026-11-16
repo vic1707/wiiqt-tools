@@ -576,45 +576,11 @@ bool MainWindow::UpdateTree()
 quint16 MainWindow::CreateIfNeeded( const QString &path, quint32 uid, quint16 gid, quint8 attr, quint8 user_perm, quint8 group_perm, quint8 other_perm )
 {
     //    qDebug() << "MainWindow::CreateIfNeeded" << path;
-    QTreeWidgetItem *item = ItemFromPath( path );
-    if( !item )
-    {
-        quint16 ret = nand.CreateEntry( path, uid, gid, attr, user_perm, group_perm, other_perm );
-        if( ret && UpdateTree() )
-            return ret;
+    bool existed = nand.Stat( path );
+    quint16 ret = NandCreateIfNeeded( nand, path, uid, gid, attr, user_perm, group_perm, other_perm );
+    if( !existed && ( !ret || !UpdateTree() ) )
         return 0;
-    }
-    //TODO - if the item already exists, check that its attributes match the expected ones
-    return item->text( 1 ).toInt();
-}
-
-bool MainWindow::InstallSharedContent( const QByteArray &stuff, const QByteArray &hash )
-{
-    //qDebug() << "MainWindow::InstallSharedContent";
-    QByteArray h;
-    if( hash.isEmpty() )
-        h = GetSha1( stuff );
-    else
-        h = hash;
-
-    QString cid = shared.GetAppFromHash( hash );
-    if( !cid.isEmpty() )			    //this one is already installed
-        return true;
-    //qDebug() << "will create new";
-
-    //get next available cid in the shared map
-    cid = shared.GetNextEmptyCid();
-    shared.AddEntry( cid, h );
-    sharedDirty = true;
-    //qDebug() << "next cid" << cid;
-
-    //create the file
-    quint16 r = CreateIfNeeded( "/shared1/" + cid + ".app", 0, 0, NAND_FILE, NAND_RW, NAND_RW, 0 );
-    if( !r )
-        return false;
-
-    //write the data to the file
-    return nand.SetData( r, stuff );
+    return ret;
 }
 
 bool MainWindow::InstallNUSItem( NusJob job )
@@ -622,170 +588,31 @@ bool MainWindow::InstallNUSItem( NusJob job )
     QString title = QString( "%1 v%2" ).arg( job.tid, 16, 16, QChar( '0' ) ).arg( job.version );
     qDebug() << "MainWindow::InstallNUSItem" << title;
 
-    quint16 r;
-    quint32 _uid;
-    quint16 _gid;
-    quint16 cnt;
-    bool deleted = false;
-    QTreeWidgetItem *content;
-    if( !job.tid || !( job.data.size() > 2 ) )
-    {
-        qWarning() << "bad sizes";
-        ShowMessage( "<b>Error installing title " + title + " to nand</b>" );
-        return false;
-    }
-    QString tid = QString( "%1" ).arg( job.tid, 16, 16, QChar( '0' ) );
-    QString upper = tid.left( 8 );
-    QString lower = tid.right( 8 );
-
-    Tmd t( job.data.takeFirst() );
-    Ticket ticket( job.data.takeFirst() );
-    if( t.Tid() != job.tid || ticket.Tid() != job.tid )
-    {
-        qWarning() << "bad tid";
-        goto error;
-    }
-    cnt = t.Count();
-    if( job.data.size() != cnt )
-    {
-        qWarning() << "content count";
-        goto error;
-    }
     //qDebug() << "uidDirty" << uidDirty;
-    if( !uidDirty )
+    if( !uidDirty && job.tid )
     {
         uidDirty = !uid.GetUid( job.tid, false );
     }
     //qDebug() << "uidDirty" << uidDirty;
-    _uid = uid.GetUid( job.tid );
 
-    _gid = t.Gid();
-    if( !_uid )
-    {
-        qWarning() << "no uid";
-        goto error;
-    }
+    bool deleted = false;
+    QByteArray oldShared = shared.Data();
+    bool ok = NandInstallTitle( nand, uid, shared, job, &deleted );
+    if( shared.Data() != oldShared )
+        sharedDirty = true;
 
-    //create all the folders
-    if( !CreateIfNeeded( "/ticket/" + upper, 0, 0, NAND_DIR, NAND_RW, NAND_RW, 0 ) )
-    { qWarning() << "can't create ticket+upper folder";goto error;}
-
-    if( !CreateIfNeeded( "/title/" + upper, 0, 0, NAND_DIR, NAND_RW, NAND_RW, NAND_READ ) )
-    { qWarning() << "can't create title+upper folder";goto error;}
-
-    if( !CreateIfNeeded( "/title/" + upper + "/" + lower, 0, 0, NAND_DIR, NAND_RW, NAND_RW, NAND_READ ) )
-    { qWarning() << "can't create title+upper+lower folder";goto error;}
-
-    if( !CreateIfNeeded( "/title/" + upper + "/" + lower + "/data", _uid, _gid, NAND_DIR, NAND_RW, 0, 0 ) )
-    { qWarning() << "can't create data folder";goto error;}
-
-    if( !CreateIfNeeded( "/title/" + upper + "/" + lower + "/content", 0, 0, NAND_DIR, NAND_RW, NAND_RW, 0 ) )
-    { qWarning() << "can't create content folder";goto error;}
-
-    //delete old tmd/.apps and whatever else in the content folder
-    content = ItemFromPath( "/title/" + upper + "/" + lower + "/content" );
-    cnt = content->childCount();
-    for ( quint16 i = 0; i < cnt; i++ )
-    {
-        if( !nand.Delete( "/title/" + upper + "/" + lower + "/content/" + content->child( i )->text( 0 ) )  )
-        { qWarning() << "error deleting old title"; goto error; }
-        deleted = true;
-    }
+    UpdateTree();
     if( deleted )
-    {
-        //nand.WriteMetaData();
-        UpdateTree();
         ShowMessage( tr( "Deleted old TMD and private contents for<br>%1" ).arg( job.tid, 16, 16, QChar( '0' ) ) );
-    }
 
-    cnt = t.Count();
-
-    //install ticket
-    r = CreateIfNeeded( "/ticket/" + upper + "/" + lower + ".tik", 0, 0, NAND_FILE, NAND_RW, NAND_RW, 0 );
-    if( !r )
-    { qWarning() << "can't create ticket";goto error;}
-    if( !nand.SetData( r, ticket.Data() ) )
-    { qWarning() << "can't write to ticket";goto error;}
-
-    //install tmd
-    r = CreateIfNeeded( "/title/" + upper + "/" + lower + "/content/title.tmd", 0, 0, NAND_FILE, NAND_RW, NAND_RW, 0 );
-    if( !r )
-    { qWarning() << "can't create tmd";goto error;}
-    if( !nand.SetData( r, t.Data() ) )
-    { qWarning() << "can't write to tmd";goto error;}
-
-    //install contents
-    //qDebug() << "will install" << cnt << "contents";
-    for( quint16 i = 0; i < cnt; i++ )
+    if( !ok )
     {
-        //qDebug() << "installing" << i;
-        //make sure the data is decrypted
-        QByteArray decData;
-        QByteArray hash;
-        if( job.decrypt )
-        {
-            decData = job.data.takeFirst();
-            if( (quint32)decData.size() != t.Size( i ) )
-            {
-                qDebug() << "wtf - size";
-                decData.resize( t.Size( i ) );
-            }
-        }
-        else
-        {
-            //decrypt the data
-            QByteArray encData = job.data.takeFirst();
-            AesSetKey( ticket.DecryptedKey() );
-            decData = AesDecrypt( i, encData );
-            decData.resize( t.Size( i ) );
-        }
-
-        //check the hash
-        hash = GetSha1( decData );
-        if( hash != t.Hash( i ) )
-        {
-            qWarning() << "hash" << i << "\n" << hash.toHex() << "\n" << t.Hash( i ).toHex();
-            goto error;
-        }
-
-        //install the content
-        if( t.Type( i ) == 1 )//private
-        {
-            r = CreateIfNeeded( "/title/" + upper + "/" + lower + "/content/" + t.Cid( i ) + ".app" , 0, 0, NAND_FILE, NAND_RW, NAND_RW, 0 );
-            if( !r )
-            {
-                qWarning() << "cant create content" << i;
-                goto error;
-            }
-            if ( !nand.SetData( r, decData ) )
-            {
-                qWarning() << "cant write content" << i;
-                goto error;
-            }
-        }
-        else if( t.Type( i ) == 0x8001 )//shared
-        {
-            if ( !InstallSharedContent( decData, hash ) )
-            {
-                qWarning() << "error installing shared" << i << hash.toHex();
-                goto error;
-            }
-        }
-        else
-        {
-            qWarning() << "type" << Qt::hex << t.Type( i );
-            goto error;
-        }
+        ShowMessage( "<b>Error installing title " + title + " to nand</b>" );
+        return false;
     }
     qDebug() << "done installing";
     ShowMessage( "Installed title " + title + " to nand" );
-
-    //nand.Delete( "/title/" + upper );
-    //UpdateTree();
     return true;
-    error:
-        ShowMessage( "<b>Error installing title " + title + " to nand</b>" );
-    return false;
 }
 
 //help -> about
@@ -971,24 +798,10 @@ void MainWindow::on_actionFormat_triggered()
     }
     unsetCursor();
 
-    //add folders to root
-    if( !nand.CreateEntry( "/sys", 0, 0, NAND_DIR, NAND_RW, NAND_RW, 0 )
-            || !nand.CreateEntry( "/ticket", 0, 0, NAND_DIR, NAND_RW, NAND_RW, 0 )
-            || !nand.CreateEntry( "/title", 0, 0, NAND_DIR, NAND_RW, NAND_RW, NAND_READ )
-            || !nand.CreateEntry( "/shared1", 0, 0, NAND_DIR, NAND_RW, NAND_RW, 0 )
-            || !nand.CreateEntry( "/shared2", 0, 0, NAND_DIR, NAND_RW, NAND_RW, NAND_RW )
-            || !nand.CreateEntry( "/import", 0, 0, NAND_DIR, NAND_RW, NAND_RW, 0 )
-            || !nand.CreateEntry( "/meta", 0x1000, 1, NAND_DIR, NAND_RW, NAND_RW, NAND_RW )
-            || !nand.CreateEntry( "/tmp", 0, 0, NAND_DIR, NAND_RW, NAND_RW, NAND_RW ) )
+    //add folders to root and cert.sys
+    if( !NandCreateDefaultEntries( nand ) )
     {
-        ShowMessage( "<b>Error! Can't create base folders in the new nand.</b>" );
-        return;
-    }
-    //add cert.sys
-    quint16 handle = nand.CreateEntry( "/sys/cert.sys", 0, 0, NAND_FILE, NAND_RW, NAND_RW, NAND_READ );
-    if( !handle || !nand.SetData( handle, QByteArray( (const char*)&certs_dat, CERTS_DAT_SIZE ) ) )
-    {
-        ShowMessage( "<b>Error! Can't cert.sys.</b>" );
+        ShowMessage( "<b>Error! Can't create base folders and cert.sys in the new nand.</b>" );
         return;
     }
 #if 0//this doesnt work right when the source uid came with 4.3 from the factory and then 3.2 or something lower is
