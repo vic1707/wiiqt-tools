@@ -1,6 +1,7 @@
 #ifndef INCLUDES_H
 #define INCLUDES_H
 
+#include "coreincludes.h"
 #include <QApplication>
 #include <QAction>
 #include <QBuffer>

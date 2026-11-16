@@ -18,7 +18,7 @@ SharedContentMap sharedM;
 UIDmap uidM;
 QList< quint64 > tids;
 QList< quint64 > validIoses;//dont put stubs in this list.
-QTreeWidgetItem *root;
+NandItem *root;
 QList<quint16> fats;
 quint32 verbose = 0;
 bool tryToKeepGoing = false;
@@ -336,12 +336,12 @@ void ShowBootInfo( quint8 boot1, QList<Boot2Info> boot2stuff )
     }
 }
 
-QTreeWidgetItem *FindItem( const QString &s, QTreeWidgetItem *parent )
+NandItem *FindItem( const QString &s, NandItem *parent )
 {
     int cnt = parent->childCount();
     for( int i = 0; i <cnt; i++ )
     {
-        QTreeWidgetItem *r = parent->child( i );
+        NandItem *r = parent->child( i );
         if( r->text( 0 ) == s )
         {
             return r;
@@ -350,9 +350,9 @@ QTreeWidgetItem *FindItem( const QString &s, QTreeWidgetItem *parent )
     return NULL;
 }
 
-QTreeWidgetItem *ItemFromPath( const QString &path )
+NandItem *ItemFromPath( const QString &path )
 {
-    QTreeWidgetItem *item = root;
+    NandItem *item = root;
     if( !path.startsWith( "/" ) || path.contains( "//" ))
     {
         return NULL;
@@ -374,7 +374,7 @@ QTreeWidgetItem *ItemFromPath( const QString &path )
     return item;
 }
 
-QString PathFromItem( QTreeWidgetItem *item )
+QString PathFromItem( NandItem *item )
 {
     QString ret;
     while( item )
@@ -392,7 +392,7 @@ QString PathFromItem( QTreeWidgetItem *item )
 QList< quint64 > InstalledTitles()
 {
     QList< quint64 > ret;
-    QTreeWidgetItem *tikFolder = ItemFromPath( "/ticket" );
+    NandItem *tikFolder = ItemFromPath( "/ticket" );
     if( !tikFolder )
     {
         Fail( "Couldnt find a ticket folder in this nand" );
@@ -402,7 +402,7 @@ QList< quint64 > InstalledTitles()
     quint16 subfc = tikFolder->childCount();
     for( quint16 i = 0; i < subfc; i++ )//check all subfolders of "/ticket"
     {
-        QTreeWidgetItem *subF = tikFolder->child( i );
+        NandItem *subF = tikFolder->child( i );
         //qDebug() << "checking folder" << subF->text( 0 );
         bool ok = false;
         quint32 upper = subF->text( 0 ).toUInt( &ok, 16 );//make sure it can be converted to int
@@ -412,7 +412,7 @@ QList< quint64 > InstalledTitles()
         quint16 subfc2 = subF->childCount();//get all entries in this subfolder
         for( quint16 j = 0; j < subfc2; j++ )
         {
-            QTreeWidgetItem *tikI = subF->child( j );
+            NandItem *tikI = subF->child( j );
             QString name = tikI->text( 0 );
             if( !name.endsWith( ".tik" ) )
             {
@@ -427,7 +427,7 @@ QList< quint64 > InstalledTitles()
             }
 
             //now see if there is a tmd
-            QTreeWidgetItem *tmdI = ItemFromPath( "/title/" + subF->text( 0 ) + "/" + name + "/content/title.tmd" );
+            NandItem *tmdI = ItemFromPath( "/title/" + subF->text( 0 ) + "/" + name + "/content/title.tmd" );
             if( !tmdI )
             {
                 continue;
@@ -513,13 +513,13 @@ void BuildGoodIosList()
     }
 }
 
-bool RecurseCheckGidUid( QTreeWidgetItem *item, const QString &uidS, const QString &gidS, const QString &path )
+bool RecurseCheckGidUid( NandItem *item, const QString &uidS, const QString &gidS, const QString &path )
 {
     bool ret = true;
     quint16 cnt = item->childCount();
     for( quint16 i = 0; i < cnt; i++ )
     {
-        QTreeWidgetItem *child = item->child( i );
+        NandItem *child = item->child( i );
         if( child->text( 3 ) != uidS || !child->text( 4 ).startsWith( gidS ) )
         {
             ret = false;
@@ -875,7 +875,7 @@ bool CheckTitleIntegrity( quint64 tid )
     QString dataP = tmdp;
     dataP.resize( 25 );
     dataP += "data";
-    QTreeWidgetItem *dataI = ItemFromPath( dataP );
+    NandItem *dataI = ItemFromPath( dataP );
     if( dataI )
     {
         quint16 gid = t.Gid();
@@ -894,7 +894,7 @@ bool CheckTitleIntegrity( quint64 tid )
         quint16 cnt = dataI->childCount();
         for( quint16 i = 0; i < cnt; i++ )
         {
-            QTreeWidgetItem *item = dataI->child( i );
+            NandItem *item = dataI->child( i );
             if( item->text( 3 ) != "00000000" || !item->text( 4 ).startsWith( "0000" ) )
                 qWarning() << "\tincorrect uid/gid for" << QString( "content/" + item->text( 0 ) );
         }
@@ -952,7 +952,7 @@ void ListDeletedTitles()
         bool deleted = false;
         //load tmd
         QString path = QString( "/title/%1/%2/content/title.tmd" ).arg( upper, 8, 16, QChar( '0' ) ).arg( lower, 8, 16, QChar( '0' ) );
-        QTreeWidgetItem *item = ItemFromPath( path );
+        NandItem *item = ItemFromPath( path );
         if( !item )
         {
             if( verbose > 1 )
@@ -1120,7 +1120,7 @@ void SetUpTree()
 {
     if( root )
         return;
-    QTreeWidgetItem *r = nand.GetTree();
+    NandItem *r = nand.GetTree();
     if( r->childCount() != 1 || r->child( 0 )->text( 0 ) != "/" )
     {
         tryToKeepGoing = false;
@@ -1131,13 +1131,13 @@ void SetUpTree()
     delete r;
 }
 
-int RecurseCountFiles( QTreeWidgetItem *dir )
+int RecurseCountFiles( NandItem *dir )
 {
     int ret = 0;
     quint16 cnt = dir->childCount();
     for( quint16 i = 0; i < cnt; i++ )
     {
-        QTreeWidgetItem *item = dir->child( i );
+        NandItem *item = dir->child( i );
         if( item->text( 7 ).startsWith( "02" ) )
             ret += RecurseCountFiles( item );
         else
@@ -1148,13 +1148,13 @@ int RecurseCountFiles( QTreeWidgetItem *dir )
     return ret;
 }
 
-int RecurseCheckHmac( QTreeWidgetItem *dir )
+int RecurseCheckHmac( NandItem *dir )
 {
     int ret = 0;
     quint16 cnt = dir->childCount();
     for( quint16 i = 0; i < cnt; i++ )
     {
-        QTreeWidgetItem *item = dir->child( i );
+        NandItem *item = dir->child( i );
         if( item->text( 7 ).startsWith( "02" ) )
             ret += RecurseCheckHmac( item );
         else

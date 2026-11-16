@@ -1,7 +1,8 @@
 #ifndef NANDBIN_H
 #define NANDBIN_H
 
-#include "includes.h"
+#include "coreincludes.h"
+#include "nanditem.h"
 #include "blocks0to7.h"
 #include "nandspare.h"
 #include <QIODevice>
@@ -41,7 +42,7 @@ struct NandEntry
 // extract files with GetFile()
 //! you should verify anything written with this code before attempting to install it on you wii
 
-//once InitNand() is called, you can get the contents of the nand in a nice QTreeWidgetItem* with GetTree()
+//once InitNand() is called, you can get the contents of the nand in a nice NandItem* with GetTree()
 class NandBin : public QObject
 {
     Q_OBJECT
@@ -70,9 +71,9 @@ public:
     bool SetDevice( QIODevice *device, const QByteArray &sidecarKeys = QByteArray() );
 
     //try to read the filesystem and create a tree from its contents
-    //this takes care of the stuff like reading the keys, finding teh superblock, and creating the QTreeWidgetItem* tree
+    //this takes care of the stuff like reading the keys, finding teh superblock, and creating the NandItem* tree
     //icons given here will be the ones used when asking for that tree
-    bool InitNand( const QIcon &dirs = QIcon(), const QIcon &files = QIcon() );
+    bool InitNand();
 
     //get a root item containing children that are actually entries in the nand dump
     //the root itself is just a container to hold them all and can be deleted once its children are taken
@@ -86,9 +87,9 @@ public:
     // 5 x3
     // 6 mode
     // 7 attr
-    QTreeWidgetItem *GetTree();
+    NandItem *GetTree();
 
-    //typed lookups for code that doesnt want a QTreeWidgetItem tree.  these read the current FST, nothing is cloned
+    //typed lookups for code that doesnt want a NandItem tree.  these read the current FST, nothing is cloned
     //get the entry for a path ( "/" is the root ).  returns false if there is no such entry
     //entry may be NULL to only check if the path exists
     bool Stat( const QString &path, NandEntry *entry = NULL );
@@ -99,7 +100,7 @@ public:
 
     //extracts an item( and all its children ) to a directory
     //this function is BLOCKING and will block the current thread, so if done in the gui thread, it will freeze your GUI till it returns
-    bool ExtractToDir( QTreeWidgetItem *item, const QString &path );
+    bool ExtractToDir( quint16 entry, const QString &path );
 
     //print a little info about the free space
     void ShowInfo();
@@ -113,7 +114,7 @@ public:
 
 
     //get data for a given path
-    //! this function is slower than the above one, as it first iterates through the QTreeWidgetItems till it finds the right ono
+    //! this function is slower than the above one, as it first iterates through the NandItems till it finds the right ono
     //! and then end up calling the above one anyways.
     //the path should be a file, not folder
     //returns an empty array on failure
@@ -193,8 +194,6 @@ private:
     int type;
 
     bool fatNames;
-    QIcon groupIcon;
-    QIcon keyIcon;
 
     NandSpare spare;//used to handle the hmac mumbojumbo
 
@@ -222,16 +221,16 @@ private:
     bool ExtractDir( fst_t fst, const QString &parent );
     bool ExtractFile( fst_t fst, const QString &parent );
 
-    QTreeWidgetItem *CreateItem( QTreeWidgetItem *parent, const QString &name, quint32 size, quint16 entry, quint32 uid, quint32 gid, quint32 x3, quint8 attr, quint8 wtf);
+    NandItem *CreateItem( NandItem *parent, const QString &name, quint32 size, quint16 entry, quint32 uid, quint32 gid, quint32 x3, quint8 attr, quint8 wtf);
 
 
 
     NandEntry EntryFromFst( quint16 entry );
 
-    QTreeWidgetItem *root;
-    bool AddChildren( QTreeWidgetItem *parent, quint16 entry );
-    QTreeWidgetItem *ItemFromPath( const QString &path );
-    QTreeWidgetItem *FindItem( const QString &s, QTreeWidgetItem *parent );
+    NandItem *root;
+    bool AddChildren( NandItem *parent, quint16 entry );
+    NandItem *ItemFromPath( const QString &path );
+    NandItem *FindItem( const QString &s, NandItem *parent );
 
     //holds info about boot1 & 2
     Blocks0to7 bootBlocks;
@@ -242,12 +241,12 @@ private:
 
     quint16 CreateNode( const QString &name, quint32 uid, quint16 gid, quint8 attr, quint8 user_perm, quint8 group_perm, quint8 other_perm );
 
-    bool DeleteItem( QTreeWidgetItem *item );
+    bool DeleteItem( NandItem *item );
     //find a parent entry for a path to be created - "/title/00000001" should give the entry for "/title"
-    QTreeWidgetItem *GetParent( const QString &path );
+    NandItem *GetParent( const QString &path );
 
-    QTreeWidgetItem *ItemFromEntry( quint16 i, QTreeWidgetItem *parent = NULL );
-    QTreeWidgetItem *ItemFromEntry( const QString &i, QTreeWidgetItem *parent = NULL );
+    NandItem *ItemFromEntry( quint16 i, NandItem *parent = NULL );
+    NandItem *ItemFromEntry( const QString &i, NandItem *parent = NULL );
 
 signals:
     //connect to these to receive messages from this object

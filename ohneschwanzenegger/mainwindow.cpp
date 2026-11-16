@@ -156,7 +156,7 @@ void MainWindow::NusIsDone()
     ui->statusBar->showMessage( tr( "Done" ), 5000 );
 
     //make sure there is a setting.txt
-    QTreeWidgetItem *item = ItemFromPath( "/title/00000001/00000002/data/setting.txt" );
+    NandItem *item = ItemFromPath( "/title/00000001/00000002/data/setting.txt" );
     if( !item && ItemFromPath( "/title/00000001/00000002/data" ) )//only try to make setting.txt if it is missing and there is a folder to hold it
     {
         quint8 reg = SETTING_TXT_UNK;
@@ -440,7 +440,7 @@ bool MainWindow::InitNand( const QString &path )
         return false;
 
     //setup the uid
-    QTreeWidgetItem *it = ItemFromPath( "/sys/uid.sys" );
+    NandItem *it = ItemFromPath( "/sys/uid.sys" );
     if( !it )
     {
         uid.CreateNew();//dont add any UID besides the system menu since we dont know what region it will be
@@ -503,12 +503,12 @@ bool MainWindow::FlushNand()
     return ( nand.WriteMetaData() && r1 && r2 );
 }
 
-QTreeWidgetItem *MainWindow::FindItem( const QString &s, QTreeWidgetItem *parent )
+NandItem *MainWindow::FindItem( const QString &s, NandItem *parent )
 {
     int cnt = parent->childCount();
     for( int i = 0; i <cnt; i++ )
     {
-        QTreeWidgetItem *r = parent->child( i );
+        NandItem *r = parent->child( i );
         if( r->text( 0 ) == s )
         {
             return r;
@@ -517,9 +517,9 @@ QTreeWidgetItem *MainWindow::FindItem( const QString &s, QTreeWidgetItem *parent
     return NULL;
 }
 
-QTreeWidgetItem *MainWindow::ItemFromPath( const QString &path )
+NandItem *MainWindow::ItemFromPath( const QString &path )
 {
-    QTreeWidgetItem *item = root;
+    NandItem *item = root;
     if( !path.startsWith( "/" ) || path.contains( "//" ))
     {
         return NULL;
@@ -540,7 +540,7 @@ QTreeWidgetItem *MainWindow::ItemFromPath( const QString &path )
     return item;
 }
 
-QString MainWindow::PathFromItem( QTreeWidgetItem *item )
+QString MainWindow::PathFromItem( NandItem *item )
 {
     QString ret;
     while( item )
@@ -561,7 +561,7 @@ bool MainWindow::UpdateTree()
         delete root;
         root = NULL;
     }
-    QTreeWidgetItem *r = nand.GetTree();
+    NandItem *r = nand.GetTree();
     if( r->childCount() != 1 || r->child( 0 )->text( 0 ) != "/" )
     {
         ShowMessage( "The nand FS is seriously broken.  I Couldn't even find a correct root" );

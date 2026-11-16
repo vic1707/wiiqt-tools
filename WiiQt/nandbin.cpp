@@ -194,7 +194,7 @@ bool NandBin::CreateNewOnDevice( QIODevice *device, const QByteArray &keys, cons
     //build the tree
     if( root )
         delete root;
-    root = new QTreeWidgetItem( QStringList() << nandPath );
+    root = new NandItem( QStringList() << nandPath );
     AddChildren( root, 0 );
 
     return true;
@@ -252,34 +252,25 @@ bool NandBin::Format( bool secure )
     //build the tree
     if( root )
         delete root;
-    root = new QTreeWidgetItem( QStringList() << nandPath );
+    root = new NandItem( QStringList() << nandPath );
     AddChildren( root, 0 );
 
     return true;
 #endif
 }
 
-QTreeWidgetItem *NandBin::GetTree()
+NandItem *NandBin::GetTree()
 {
     //qDebug() << "NandBin::GetTree()";
     return root->clone();
 }
 
-bool NandBin::ExtractToDir( QTreeWidgetItem *item, const QString &path )
+bool NandBin::ExtractToDir( quint16 entry, const QString &path )
 {
-    if( !item )
-        return false;
-    bool ok = false;
-    quint16 entry = item->text( 1 ).toInt( &ok );
-    if( !ok )
-    {
-        emit SendError( tr( "Error converting entry(%1) to a number" ).arg( item->text( 1 ) ) );
-        return false;
-    }
     return ExtractFST( entry, path, true );//dont bother extracting this item's siblings
 }
 
-QTreeWidgetItem *NandBin::CreateItem( QTreeWidgetItem *parent, const QString &name, quint32 size, quint16 entry, quint32 uid, quint32 gid, quint32 x3, quint8 attr, quint8 wtf)
+NandItem *NandBin::CreateItem( NandItem *parent, const QString &name, quint32 size, quint16 entry, quint32 uid, quint32 gid, quint32 x3, quint8 attr, quint8 wtf)
 {
     if( !parent )
         return NULL;
@@ -309,19 +300,11 @@ QTreeWidgetItem *NandBin::CreateItem( QTreeWidgetItem *parent, const QString &na
 
     text << name << enStr << sizeStr << uidStr << gidStr << x3Str << wtfStr << attrStr;
     //qDebug() << "adding" << name << en << size << uid << gid << x3 << mode << attr;
-    QTreeWidgetItem *child = new QTreeWidgetItem( parent, text );
-    child->setTextAlignment( 1, Qt::AlignRight | Qt::AlignVCenter );//align to the right
-    child->setTextAlignment( 2, Qt::AlignRight | Qt::AlignVCenter );
-    child->setTextAlignment( 3, Qt::AlignRight | Qt::AlignVCenter );
-    child->setTextAlignment( 4, Qt::AlignRight | Qt::AlignVCenter );
-    child->setTextAlignment( 5, Qt::AlignRight | Qt::AlignVCenter );
-    child->setTextAlignment( 6, Qt::AlignRight | Qt::AlignVCenter );
-    //child->setTextAlignment( 7, Qt::AlignRight | Qt::AlignVCenter );
-    child->setFont( 7, QFont( "Courier New", 10, 5 ) );
+    NandItem *child = new NandItem( parent, text );
     return child;
 }
 
-bool NandBin::AddChildren( QTreeWidgetItem *parent, quint16 entry )
+bool NandBin::AddChildren( NandItem *parent, quint16 entry )
 {
     //qDebug() << "NandBin::AddChildren" << parent->text( 0 ) << hex << entry;
     if( entry >= 0x17ff )
@@ -345,18 +328,11 @@ bool NandBin::AddChildren( QTreeWidgetItem *parent, quint16 entry )
             return false;
     }
 
-    QTreeWidgetItem *child = CreateItem( parent, FstName( fst ), fst.size, entry, fst.uid, fst.gid, fst.x3, fst.attr, fst.wtf );
+    NandItem *child = CreateItem( parent, FstName( fst ), fst.size, entry, fst.uid, fst.gid, fst.x3, fst.attr, fst.wtf );
 
-    //set some icons
-    if( ( fst.attr & 3 ) == 1 )
-    {
-        //qDebug() << "is a file";
-        child->setIcon( 0, keyIcon );
-    }
-    else
+    if( ( fst.attr & 3 ) != 1 )
     {
         //qDebug() << "is a folder" << (fst.attr & 3);
-        child->setIcon( 0, groupIcon );
         //try to add subfolder contents to the tree
         if( fst.sub != 0xffff && !AddChildren( child, fst.sub ) )
             return false;
@@ -457,7 +433,7 @@ bool NandBin::ExtractFile( fst_t fst, const QString &parent )
     return true;
 }
 
-bool NandBin::InitNand( const QIcon &dirs, const QIcon &files )
+bool NandBin::InitNand()
 {
     fstInited = false;
     memset( (void*)&fsts, 0, sizeof( fst_t ) * 0x17ff );
@@ -496,10 +472,8 @@ bool NandBin::InitNand( const QIcon &dirs, const QIcon &files )
     if( root )
         delete root;
 
-    groupIcon = dirs;
-    keyIcon = files;
 
-    root = new QTreeWidgetItem( QStringList() << nandPath );
+    root = new NandItem( QStringList() << nandPath );
     AddChildren( root, 0 );
 
     //checkout the blocks for boot1&2
@@ -1066,7 +1040,7 @@ void NandBin::SetFixNamesForFAT( bool fix )
 
 const QByteArray NandBin::GetData( const QString &path )
 {
-    QTreeWidgetItem *item = ItemFromPath( path );
+    NandItem *item = ItemFromPath( path );
     if( !item )
         return QByteArray();
 
@@ -1143,12 +1117,12 @@ bool NandBin::Stat( const QString &path, NandEntry *entry )
     return true;
 }
 
-QTreeWidgetItem *NandBin::ItemFromPath( const QString &path )
+NandItem *NandBin::ItemFromPath( const QString &path )
 {
     if( !root || !root->childCount() )
         return NULL;
 
-    QTreeWidgetItem *item = root->child( 0 );
+    NandItem *item = root->child( 0 );
     if( item->text( 0 ) != "/" )
     {
         qWarning() << "NandBin::ItemFromPath -> root is not \"/\"" << item->text( 0 );
@@ -1175,7 +1149,7 @@ QTreeWidgetItem *NandBin::ItemFromPath( const QString &path )
     return item;
 }
 
-QTreeWidgetItem *NandBin::GetParent( const QString &path )
+NandItem *NandBin::GetParent( const QString &path )
 {
     if( !path.startsWith( "/" ) || !root || !root->childCount() )//invalid entry
         return NULL;
@@ -1191,12 +1165,12 @@ QTreeWidgetItem *NandBin::GetParent( const QString &path )
     return ItemFromPath( parent );
 }
 
-QTreeWidgetItem *NandBin::FindItem( const QString &s, QTreeWidgetItem *parent )
+NandItem *NandBin::FindItem( const QString &s, NandItem *parent )
 {
     int cnt = parent->childCount();
     for( int i = 0; i <cnt; i++ )
     {
-        QTreeWidgetItem *r = parent->child( i );
+        NandItem *r = parent->child( i );
         if( r->text( 0 ) == s )
         {
             return r;
@@ -1245,12 +1219,12 @@ void NandBin::ShowInfo()
             << "\nused      :" << used;
 }
 
-QTreeWidgetItem *NandBin::ItemFromEntry( quint16 i, QTreeWidgetItem *parent )
+NandItem *NandBin::ItemFromEntry( quint16 i, NandItem *parent )
 {
     return ItemFromEntry( QString( "%1" ).arg( i ), parent );
 }
 
-QTreeWidgetItem *NandBin::ItemFromEntry( const QString &i, QTreeWidgetItem *parent )
+NandItem *NandBin::ItemFromEntry( const QString &i, NandItem *parent )
 {
     if( !parent )
         return NULL;
@@ -1260,13 +1234,13 @@ QTreeWidgetItem *NandBin::ItemFromEntry( const QString &i, QTreeWidgetItem *pare
     quint32 cnt = parent->childCount();
     for( quint32 j = 0; j < cnt; j++ )
     {
-        QTreeWidgetItem *child = parent->child( j );
+        NandItem *child = parent->child( j );
         if( child->text( 1 ) == i )
             return child;
 
         //qDebug() << child->text( 2 ) << i;
 
-        QTreeWidgetItem *r = ItemFromEntry( i, child );
+        NandItem *r = ItemFromEntry( i, child );
         if( r )
             return r;
     }
@@ -1369,8 +1343,8 @@ quint16 NandBin::CreateNode( const QString &name, quint32 uid, quint16 gid, quin
         return 0;
     }
 
-    QByteArray n = name.toLatin1();
-    n.resize( 12 );
+    //resize() would leave the bytes after a short name uninitialized, and they end up in the FST
+    QByteArray n = name.toLatin1().leftJustified( 12, '\0', true );
     //qDebug() << "will add entry for" << n << "at" << hex << i;
     memcpy( &fsts[ i ].filename, n.data(), 12 );
     fsts[ i ].attr = attr;
@@ -1398,7 +1372,7 @@ quint16 NandBin::CreateEntry( const QString &path, quint32 uid, quint16 gid, qui
     //qDebug() << "NandBin::CreateEntry" << path;
 
     quint16 ret = 0;
-    QTreeWidgetItem *par = GetParent( path );
+    NandItem *par = GetParent( path );
     if( !par )
     {
         qDebug() << "NandBin::CreateEntry -> parent doesnt exist for" << path;
@@ -1409,7 +1383,7 @@ quint16 NandBin::CreateEntry( const QString &path, quint32 uid, quint16 gid, qui
     name.remove( 0, name.lastIndexOf( "/" ) + 1 );
     if( name.size() > 12 )
         return 0;
-    //QTreeWidgetItem *cur = NULL;
+    //NandItem *cur = NULL;
     quint32 cnt = par->childCount();
     for( quint32 i = 0; i < cnt; i++ )
     {
@@ -1461,25 +1435,17 @@ quint16 NandBin::CreateEntry( const QString &path, quint32 uid, quint16 gid, qui
         fsts[ ret ].sib = fsts[ parIdx ].sub;
         fsts[ parIdx ].sub = ret;
     }
-    QTreeWidgetItem *child = CreateItem( par, name, 0, ret, uid, gid, 0, fsts[ ret ].attr, 0 );
-    if( attr == NAND_FILE )
-    {
-        child->setIcon( 0, keyIcon );
-    }
-    else
-    {
-        child->setIcon( 0, groupIcon );
-    }
+    CreateItem( par, name, 0, ret, uid, gid, 0, fsts[ ret ].attr, 0 );
     return ret;
 }
 
 bool NandBin::Delete( const QString &path )
 {
-    QTreeWidgetItem *i = ItemFromPath( path );
+    NandItem *i = ItemFromPath( path );
     return DeleteItem( i );
 }
 
-bool NandBin::DeleteItem( QTreeWidgetItem *item )
+bool NandBin::DeleteItem( NandItem *item )
 {
     if( !item )
     {
@@ -1499,7 +1465,7 @@ bool NandBin::DeleteItem( QTreeWidgetItem *item )
     //find the entry that is this one's previous sibling
     quint16 pId = 0xffff;//this is the index of the item in relation to its parent
     quint16 prevSib = 0;
-    QTreeWidgetItem *par = item->parent();
+    NandItem *par = item->parent();
     if( !par )
     {
         qWarning() << "wtf2";
@@ -1599,7 +1565,7 @@ bool NandBin::DeleteItem( QTreeWidgetItem *item )
     }
     memset( &fsts[ idx ], 0, sizeof( fst_t ) );	    //clear this entry
     fsts[ idx ].fst_pos = idx;				    //reset this
-    QTreeWidgetItem *d = par->takeChild( pId );
+    NandItem *d = par->takeChild( pId );
     //    qDebug() << "deleting tree item" << d->text( 0 );
     delete d;
     return true;
@@ -1607,7 +1573,7 @@ bool NandBin::DeleteItem( QTreeWidgetItem *item )
 
 bool NandBin::SetData( const QString &path, const QByteArray &data )
 {
-    QTreeWidgetItem *i = ItemFromPath( path );
+    NandItem *i = ItemFromPath( path );
     if( !i )
     {
         qDebug() << "!item" << path;
@@ -1732,7 +1698,7 @@ bool NandBin::SetData( quint16 idx, const QByteArray &data )
 
     fsts[ idx ].size = data.size();
 
-    QTreeWidgetItem *i = ItemFromEntry( idx, root );
+    NandItem *i = ItemFromEntry( idx, root );
     if( !i )
     {
         qDebug() << "!ItemFromEntry";

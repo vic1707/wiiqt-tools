@@ -1,7 +1,7 @@
 #ifndef BLOCKS0TO7_H
 #define BLOCKS0TO7_H
 
-#include "includes.h"
+#include "coreincludes.h"
 //for now im creating this class to handle getting info about the first 8 blocks of nand
 //im not sure what all it should be doing, so it may become a clusterfuck
 //for now, just pass it a list of 8 bytearrays, each 0x20000 bytes.  then check IsOk(), and then you can check boot1version and Boot2Infos()

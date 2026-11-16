@@ -90,7 +90,11 @@ QTreeWidgetItem *NandThread::GetTree()
         emit SendError( tr( "Wait till the current job is done" ) );
         return NULL;
     }
-    return nandBin.GetTree();
+    //the nand code has no widgets: build the gui items from its tree
+    NandItem *tree = nandBin.GetTree();
+    QTreeWidgetItem *ret = NandItemToTreeWidgetItem( tree, dirIcon, fileIcon );
+    delete tree;
+    return ret;
 }
 
 bool NandThread::InitNand( QIcon dirs, QIcon files )
@@ -100,7 +104,9 @@ bool NandThread::InitNand( QIcon dirs, QIcon files )
         emit SendError( tr( "Wait till the current job is done" ) );
         return false;
     }
-    return nandBin.InitNand( dirs, files );
+    dirIcon = dirs;
+    fileIcon = files;
+    return nandBin.InitNand();
 }
 
 const QList<quint16> NandThread::GetFats()
@@ -152,7 +158,7 @@ void NandThread::run()
     mutex.unlock();
     emit SendProgress( 0 );
 
-    nandBin.ExtractToDir( itemToExtract, extractPath );
+    nandBin.ExtractToDir( itemToExtract->text( 1 ).toInt(), extractPath );
 
     delete itemToExtract;
     itemToExtract = NULL;

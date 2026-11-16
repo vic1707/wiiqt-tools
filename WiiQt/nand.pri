@@ -1,5 +1,5 @@
 # NAND reading core, shared by the inspector and the library in nand.pro.
-QT += core gui widgets
+QT += core
 CONFIG += c++17 sdk_no_version_check
 INCLUDEPATH += $$PWD
 SOURCES += $$PWD/nandbin.cpp \

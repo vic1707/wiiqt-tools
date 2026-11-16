@@ -22,7 +22,7 @@ public:
 
 private:
     Ui::MainWindow *ui;
-    QTreeWidgetItem *root;
+    NandItem *root;
     bool nandInited;
     bool uidDirty;
     bool sharedDirty;
@@ -39,9 +39,9 @@ private:
     bool InitNand( const QString &path );
     bool UpdateTree();
 
-    QString PathFromItem( QTreeWidgetItem *item );
-    QTreeWidgetItem *ItemFromPath( const QString &path );
-    QTreeWidgetItem *FindItem( const QString &s, QTreeWidgetItem *parent );
+    QString PathFromItem( NandItem *item );
+    NandItem *ItemFromPath( const QString &path );
+    NandItem *FindItem( const QString &s, NandItem *parent );
 
     bool InstallNUSItem( NusJob job );
     quint16 CreateIfNeeded( const QString &path, quint32 uid, quint16 gid, quint8 attr, quint8 user_perm, quint8 group_perm, quint8 other_perm );

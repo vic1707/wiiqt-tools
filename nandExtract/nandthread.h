@@ -3,6 +3,7 @@
 
 #include "../WiiQt/includes.h"
 #include "../WiiQt/nandbin.h"
+#include "../WiiQt/nanditemwidget.h"
 
 
 //TODO:  this thread really isnt setup to be inturruptable.  especially while it is extracting the full nand.bin
@@ -51,6 +52,8 @@ private:
 
     QString extractPath;
     QTreeWidgetItem *itemToExtract;
+    QIcon dirIcon;
+    QIcon fileIcon;
     NandBin nandBin;
 
 

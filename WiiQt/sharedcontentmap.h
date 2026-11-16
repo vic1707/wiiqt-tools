@@ -1,7 +1,7 @@
 #ifndef SHAREDCONTENTMAP_H
 #define SHAREDCONTENTMAP_H
 
-#include "includes.h"
+#include "coreincludes.h"
 
 //class for handling a content.map from a wii nand
 class SharedContentMap

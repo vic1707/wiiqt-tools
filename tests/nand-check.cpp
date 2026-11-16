@@ -1,3 +1,4 @@
+#include <QTemporaryDir>
 #include "../WiiQt/nandbin.h"
 #include "../WiiQt/nandinstall.h"
 #include "../WiiQt/nusdownloader.h"
@@ -25,7 +26,7 @@ static void Check( const QString &checker, const QString &path, const QStringLis
 }
 
 //the typed lookups must describe the same filesystem as the item tree
-static void CheckTypedLookups( NandBin &nand, QTreeWidgetItem *item, const QString &path )
+static void CheckTypedLookups( NandBin &nand, NandItem *item, const QString &path )
 {
     NandEntry entry;
     Require( nand.Stat( path, &entry ), "Stat missed an entry that is in the tree" );
@@ -234,7 +235,7 @@ int main( int argc, char **argv )
         Require( nand.SetData( entry( titlePath, 0, 0, NAND_FILE ), content ), "Write title content failed" );
         Require( nand.WriteMetaData(), "Write metadata failed" );
 
-        QTreeWidgetItem *tree = nand.GetTree();
+        NandItem *tree = nand.GetTree();
         CheckTypedLookups( nand, tree->child( 0 ), "/" );
         delete tree;
         NandEntry file;

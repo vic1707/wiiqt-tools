@@ -3,6 +3,7 @@ TEMPLATE = lib
 CONFIG += staticlib
 TARGET = wiiqt-nand
 QT += network
+QT -= gui
 DEFINES += NAND_BIN_CAN_WRITE
 include(nand.pri)
 SOURCES += $$PWD/sharedcontentmap.cpp \
